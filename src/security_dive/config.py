@@ -188,6 +188,10 @@ class Config:
     def dossier_path(self, project: str, area: str) -> Path:
         return self.ledger_dir / "dossiers" / project / f"{area}.md"
 
+    def export_dir(self, project: str) -> Path:
+        """Cluster exports for zepsec (one directory per cluster)."""
+        return self.ledger_dir / "exports" / project
+
     def run_record_path(self, project: str, run_id: int) -> Path:
         return self.ledger_dir / "runs" / project / f"run-{run_id}.json"
 

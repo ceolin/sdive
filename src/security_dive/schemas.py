@@ -108,4 +108,54 @@ class VerifyResult(_Strict):
         return self
 
 
-SCHEMAS: dict[str, type[BaseModel]] = {"audit": AuditResult, "verify": VerifyResult}
+class WriteupResult(_Strict):
+    """Output of a write-up: the advisory draft for one cluster. The fields up to
+    `rationale` are zepsec's MCUboot verdict (`result.json`) fields, so zepsec's
+    filing tools read the export directly; the rest are sdive's additions."""
+
+    cluster: str = Field(description="Cluster slug exactly as given in the brief")
+    model: str = Field(description="Model ID the agent is running as")
+    is_vulnerability: Literal["yes", "no", "unclear"]
+    property_violated: Literal["P1", "P2", "P3", "P4", "P5", "P6"] | None
+    attacker_class: Literal["A1", "A2", "A3"] | None
+    vuln_class: Literal["memory-safety", "bounds", "integer-overflow", "use-after-free",
+                        "info-leak", "auth", "crypto", "dos", "race", "logic",
+                        "input-validation", "other"] | None
+    cwe: str | None = Field(pattern=r"^CWE-\d+$")
+    severity: Literal["none", "low", "moderate", "high", "critical"]
+    cvss_vector: str | None = Field(description="CVSS 3.1 base vector; sdive scores it")
+    attacker_reachable: Literal["yes", "maybe", "no", "unknown"]
+    reachable_surface: list[str] = []
+    affected_components: list[str] = Field(description="Repo-relative paths in the snapshot")
+    affected_functions: list[str] = []
+    introduced_by: str | None
+    affected_versions: str | None
+    reportable: bool
+    reportable_reason: str | None
+    advisory_summary: str | None = Field(max_length=150)
+    advisory_description: str | None
+    confidence: Literal["low", "medium", "high"]
+    evidence: list[str] = Field(min_length=1)
+    rationale: str
+    # sdive additions
+    affected_configurations: list[str] = Field(
+        default=[], description="Build options (MCUBOOT_*/CONFIG_*) and ports it needs")
+    recommended_fix: str = Field(description="The one fix that closes every member")
+    open_questions: list[str] = Field(
+        default=[], description="What the write-up could not settle from source")
+
+    @model_validator(mode="after")
+    def _check(self) -> WriteupResult:
+        if self.is_vulnerability == "yes":
+            missing = [k for k in ("property_violated", "attacker_class", "cwe", "cvss_vector",
+                                   "advisory_summary", "advisory_description")
+                       if not getattr(self, k)]
+            if missing:
+                raise ValueError(f"a vulnerability needs {', '.join(missing)}")
+        if not self.reportable and not (self.reportable_reason or "").strip():
+            raise ValueError("reportable false needs reportable_reason")
+        return self
+
+
+SCHEMAS: dict[str, type[BaseModel]] = {
+    "audit": AuditResult, "verify": VerifyResult, "writeup": WriteupResult}

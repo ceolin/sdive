@@ -174,6 +174,33 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (finding_id, snapshot_id)
     );
     """,
+    # v5: write-up and export. A write-up is a versioned advisory draft for one
+    # cluster (validated agent output); a human approves a version, and an
+    # export writes that version to analysis/exports/ for zepsec.
+    """
+    CREATE TABLE writeups (
+        id             INTEGER PRIMARY KEY,
+        cluster_id     INTEGER NOT NULL REFERENCES clusters(id),
+        version        INTEGER NOT NULL,
+        content        TEXT NOT NULL,   -- JSON: the validated write-up plus cvss_score
+        members        TEXT NOT NULL,   -- JSON: member slugs it was written for
+        model          TEXT,
+        inputs         TEXT,            -- JSON: agent file hash, brief hash
+        created_at     TEXT NOT NULL,
+        approved_at    TEXT,
+        approval_note  TEXT,
+        UNIQUE (cluster_id, version)
+    );
+
+    CREATE TABLE exports (
+        id            INTEGER PRIMARY KEY,
+        cluster_id    INTEGER NOT NULL REFERENCES clusters(id),
+        writeup_id    INTEGER NOT NULL REFERENCES writeups(id),
+        path          TEXT NOT NULL,
+        content_hash  TEXT NOT NULL,
+        exported_at   TEXT NOT NULL
+    );
+    """,
 ]
 
 

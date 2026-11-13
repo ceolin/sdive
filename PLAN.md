@@ -270,16 +270,22 @@ a cluster's membership clears its track.
    reason (`sdive cluster track C advisory|plain-fix --note …`), following the
    disclosure policy: shipped → `advisory`; merged since the last release →
    `plain-fix`.
-3. **Write-up** (to build): per cluster, advisory summary and description,
-   recommended fix, affected configurations, CVSS, introducing commit.
-4. **Export** (to build): `sdive export C` writes
-   `analysis/exports/<p>/<cluster>/` — `cluster.json` shaped like zepsec's
-   MCUboot `result.json` (`is_vulnerability`, `reportable`, severity and CVSS,
-   CWE, `advisory_summary`/`advisory_description`, `affected_components`,
-   `affected_versions`, `introduced_by`, `property_violated`,
-   `attacker_class`, `recommended_fix`) plus provenance (snapshot, runs,
-   verifier verdicts, `carried_from`) and a readable `cluster.md`. Findings move
-   to `exported`. Never contains truth-set content.
+3. **Write-up** (built: `/sdive-writeup`, `sdive writeup brief|record|show|approve`).
+   The blind `sdive-writer` subagent drafts, per cluster, zepsec's MCUboot
+   verdict fields (advisory summary and description, CVSS 3.1, CWE,
+   `introduced_by`, `affected_versions`, components and functions) plus
+   `affected_configurations`, `recommended_fix` and `open_questions`. sdive
+   validates each draft: it scores the CVSS vector and checks the severity
+   band, checks `reportable` against the track and cited components against
+   the snapshot, and rejects local paths. Drafts are versions (`writeups`
+   table); a human approves one. A membership change makes the write-up stale.
+4. **Export** (built: `sdive export`): writes the approved version to
+   `analysis/exports/<p>/<cluster>/`: `cluster.json` (schema
+   `sdive-export/1`: the verdict fields at the top level so zepsec reads it as
+   a `result.json`, plus `cvss_score`, track, snapshot `sha`, members with
+   claims, locations, verify runs, scope and `carried_from`, and provenance)
+   and `cluster.md`. Findings move to `exported`; each export is recorded
+   (`exports` table). Built from the ledger alone: never truth-set content.
 5. **zepsec, client side** (zepsec's work): a local intake channel reads the
    export directory, dedups against MCUboot advisories and the disclosure
    corpus, and runs the pre-fix flow (embargoed draft → `/mcuboot-fix` →

@@ -36,9 +36,9 @@ sdive findings <p>
 /sdive-triage <p>
     (status at any time: sdive triage <p>; the commands it uses are in §4)
 
-# 5. Write up and export (to build)
-/sdive-writeup <cluster>
-sdive export <cluster>
+# 5. Write up and export (interactive: drafts, you review, it exports)
+/sdive-writeup <p> [cluster...|N]
+    (status at any time: sdive writeups <p>; the commands it uses are in §5)
 
 # 6. zepsec, client side (zepsec's skills): dedup, GHSA draft, fix, CVE
 
@@ -72,7 +72,7 @@ flowchart TD
 
     track -->|advisory: shipped| export
     track -->|plain-fix: never released| export
-    export["Write-up · export<br/>analysis/exports/&lt;p&gt;/&lt;cluster&gt;/"] --> zepsec
+    export["Write-up · review · export: /sdive-writeup<br/>analysis/exports/&lt;p&gt;/&lt;cluster&gt;/"] --> zepsec
 
     subgraph zepsec ["zepsec (client side)"]
         dedup["Dedup vs advisories<br/>and disclosures"] --> ghsa["Embargoed GHSA draft"]
@@ -236,28 +236,72 @@ a different set of findings.
 | `sdive cluster track <cluster> advisory\|plain-fix --note N` | Records the track and its evidence. |
 | `sdive clusters <p>` / `sdive cluster show <cluster>` | Clusters with track, combined scope and release range, then findings in none; one cluster as JSON. |
 
-## 5. Write up and export (to build)
+## 5. Write up and export
 
-- **Write-up** (`/sdive-writeup <cluster>`, to build): drafts, per cluster,
-  what zepsec needs and the ledger lacks:
-  - the advisory summary and description
-  - the recommended fix
-  - the affected configurations (`MCUBOOT_*` / Kconfig)
-  - the CVSS vector
-  - the introducing commit
-- **Export** (`sdive export <cluster>`, to build): writes
-  `analysis/exports/<p>/<cluster>/`. The directory holds:
-  - `cluster.json`, shaped like zepsec's MCUboot `result.json`:
-    `is_vulnerability`, `reportable`, severity and CVSS, CWE,
-    `advisory_summary`/`advisory_description`, `affected_components`,
-    `affected_versions`, `introduced_by`, `property_violated`,
-    `attacker_class`, `recommended_fix`, plus provenance (snapshot, runs,
-    verifier verdicts, `carried_from`)
-  - a readable `cluster.md`
+Turns each tracked cluster into an advisory draft, and an approved draft into
+a local export for zepsec. **How to run it:** `/sdive-writeup <p>` in an
+interactive session, naming clusters or a count, or with neither to be offered
+a batch. `sdive writeups <p>` shows where every tracked cluster stands.
 
-  The member findings move to `exported`. The export stays on this machine.
-  It never goes to zepsec's prod Instance and never contains truth-set
-  content.
+1. **Draft.** `sdive writeup brief <cluster>` writes a brief for the
+   `sdive-writer` subagent, which is blind like the analysis agents. The brief
+   holds the cluster (its rationale is the one fix; its track note is the
+   release evidence) and, per member, the claim, auditor notes, locations,
+   the verifier's reasoning, and the release-scoping blame. The writer re-reads
+   the code and writes zepsec's MCUboot verdict fields:
+   - `is_vulnerability`, `property_violated`, `attacker_class`, `vuln_class`,
+     `cwe`
+   - `severity`, `cvss_vector`
+   - `attacker_reachable`, `reachable_surface`, `affected_components`,
+     `affected_functions`
+   - `introduced_by`, `affected_versions`, `reportable`, `reportable_reason`
+   - `advisory_summary` and `advisory_description` (GHSA Markdown)
+   - `confidence`, `evidence`, `rationale`
+
+   It adds sdive's own fields: `affected_configurations`, `recommended_fix`
+   (which briefs the fix author) and `open_questions`.
+2. **Record.** `sdive writeup record <cluster>` validates the draft and
+   stores it as a new version. sdive scores the CVSS 3.1 vector itself, and
+   `severity` must be its GitHub band. `reportable` must match the track
+   (`advisory` → true, `plain-fix` → false with a post-release-only reason).
+   Every cited component must exist in the snapshot, and no absolute or local
+   path may appear in the text, since the text is published. A rejected draft
+   goes back to the writer with the reasons.
+3. **Review.** `sdive writeup show <cluster> [--version N] [--json]` renders
+   the draft exactly as it will be exported. You approve it, ask for changes
+   (the writer revises from the previous version plus your feedback; `writeup
+   brief --feedback` does the same in a later session), or skip it.
+   `sdive writeup approve <cluster> [--version N] [--note N]` records the
+   approval.
+4. **Export.** `sdive export <p> [cluster...]` writes the approved version to
+   `analysis/exports/<p>/<cluster>/`, or every approved cluster when none is
+   named:
+   - `cluster.json`: the verdict fields at the top level (so zepsec's filing
+     tools read it as a `result.json`), plus `cvss_score`, the cluster and its
+     track, the snapshot `sha`, the members (claims, locations, verify runs,
+     scope, `carried_from`) and provenance (write-up version and approval,
+     origin runs, sdive commit);
+   - `cluster.md`: the same, readable.
+
+   The member findings move to `exported`. The export stays on this machine:
+   it never goes to zepsec's prod Instance, and it is built from the ledger
+   alone, so it never contains truth-set content.
+
+A write-up belongs to the members it was written for. If the cluster's
+membership changes afterwards (which also clears its track), the write-up is
+`stale` and must be drafted again. States in `sdive writeups`:
+`needs-writeup`, `stale`, `draft`, `approved`, `exported`. Approving a new
+version of an exported cluster makes it `approved` again, ready to re-export.
+
+| Command | Does |
+|---|---|
+| `sdive writeups <p> [--json]` | Each tracked cluster's state, write-up version, exported version and severity. |
+| `sdive writeup brief <cluster> [--feedback F]` | Writes the writer's brief to staging and prints it. |
+| `sdive writeup record <cluster> [--file F]` | Validates the writer's result and stores a new version. |
+| `sdive writeup show <cluster> [--version N] [--json]` | The draft as it will be exported. |
+| `sdive writeup approve <cluster> [--version N] [--note N]` | Approves a version for export. |
+| `sdive export <p> [cluster...]` | Writes approved write-ups to `analysis/exports/<p>/<cluster>/`; members → `exported`. |
+| `sdive schema writeup` | The JSON schema the writer's result must satisfy. |
 
 ## 6. zepsec, client side
 

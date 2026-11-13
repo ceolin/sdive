@@ -16,7 +16,7 @@ from rich.table import Table
 
 from . import bench as bench_mod
 from . import carry as carry_mod
-from . import launch, ledger, repo, triage
+from . import launch, ledger, repo, triage, writeup
 from .config import MAIN_LEDGER, Config, ConfigError, Project, load_config
 from .db import connect
 from .schemas import SCHEMAS
@@ -950,8 +950,110 @@ def bench_judge(c: Ctx, project: str, name: str, item: str, slugs: tuple[str, ..
     click.echo(f"{name} {item}: {what}")
 
 
+# --- write-up and export ----------------------------------------------------
+
+
+@main.group("writeup")
+def writeup_grp() -> None:
+    """Advisory write-ups for tracked clusters (drafted by the sdive-writer agent)."""
+
+
+@writeup_grp.command("brief")
+@click.argument("cluster")
+@click.option("--feedback", help="What the next version must change (for a revision).")
+@pass_ctx
+def writeup_brief(c: Ctx, cluster: str, feedback: str | None) -> None:
+    """Write (to staging) and print the writer's brief for CLUSTER."""
+    _emit_json(writeup.brief(c.conn, c.cfg, cluster, feedback))
+
+
+@writeup_grp.command("record")
+@click.argument("cluster")
+@click.option("--file", "path", type=click.Path(path_type=Path),
+              help="Result JSON (default: the cluster's staging path).")
+@pass_ctx
+def writeup_record(c: Ctx, cluster: str, path: Path | None) -> None:
+    """Validate the writer's result for CLUSTER and store it as a new version."""
+    r = writeup.record(c.conn, c.cfg, cluster, path)
+    score = f" {r['cvss_score']}" if r["cvss_score"] is not None else ""
+    click.echo(f"{cluster}: write-up v{r['version']} recorded ({r['severity']}{score}): "
+               f"{r['summary']}")
+
+
+@writeup_grp.command("show")
+@click.argument("cluster")
+@click.option("--version", type=int, help="Default: the latest.")
+@click.option("--json", "as_json", is_flag=True, help="The export document as JSON.")
+@pass_ctx
+def writeup_show(c: Ctx, cluster: str, version: int | None, as_json: bool) -> None:
+    """Show a write-up as it would be exported (cluster.md, or --json)."""
+    doc = writeup.document(c.conn, c.cfg, cluster, writeup.get(c.conn, cluster, version))
+    if as_json:
+        _emit_json(doc)
+    else:
+        click.echo(writeup.render_md(doc))
+
+
+@writeup_grp.command("approve")
+@click.argument("cluster")
+@click.option("--version", type=int, help="Default: the latest.")
+@click.option("--note", help="Anything the approval depends on.")
+@pass_ctx
+def writeup_approve(c: Ctx, cluster: str, version: int | None, note: str | None) -> None:
+    """Approve a write-up version of CLUSTER for export."""
+    v = writeup.approve(c.conn, cluster, version, note)
+    click.echo(f"{cluster}: write-up v{v} approved")
+
+
+@main.command("writeups")
+@click.argument("project")
+@click.option("--json", "as_json", is_flag=True)
+@pass_ctx
+def writeups(c: Ctx, project: str, as_json: bool) -> None:
+    """Tracked clusters between triage and export: needs-writeup, stale, draft,
+    approved, exported."""
+    c.project(project)
+    rows = writeup.status(c.conn, project)
+    if as_json:
+        _emit_json(rows)
+        return
+    cols = ("cluster", "track", "n", "state", "version", "exported", "severity")
+    cells = [(r["cluster"], r["track"], str(r["members"]), r["state"], str(r["version"] or ""),
+              str(r["exported_version"] or ""), r["severity"] or "") for r in rows]
+    t = Table()
+    for i, col in enumerate(cols):
+        t.add_column(col, no_wrap=True, min_width=max([len(col)] + [len(x[i]) for x in cells]))
+    for x in cells:
+        t.add_row(*x)
+    console.print(t)
+    counts = defaultdict(int)
+    for r in rows:
+        counts[r["state"]] += 1
+    click.echo(", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no tracked clusters")
+
+
+@main.command("export")
+@click.argument("project")
+@click.argument("clusters", nargs=-1)
+@pass_ctx
+def export_cmd(c: Ctx, project: str, clusters: tuple[str, ...]) -> None:
+    """Export approved write-ups to <ledger>/exports/PROJECT/<cluster>/ for zepsec.
+
+    Exports the named clusters, else every cluster whose latest write-up is
+    approved and not yet exported. Members move to `exported`."""
+    c.project(project)
+    names = list(clusters) or [r["cluster"] for r in writeup.status(c.conn, project)
+                               if r["state"] == "approved"]
+    if not names:
+        click.echo("nothing approved to export")
+        return
+    for name in names:
+        out = writeup.export(c.conn, c.cfg, name)
+        click.echo(f"{name}: exported to {out}")
+
+
 @main.command()
 @click.argument("kind", type=click.Choice(sorted(SCHEMAS)))
 def schema(kind: str) -> None:
-    """Print the JSON schema a run result must satisfy."""
+    """Print the JSON schema a run (or write-up) result must satisfy."""
     _emit_json(SCHEMAS[kind].model_json_schema())
