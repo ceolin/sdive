@@ -643,8 +643,9 @@ def cluster_new(c: Ctx, project: str, slug: str, findings: tuple[str, ...], titl
 @pass_ctx
 def cluster_add(c: Ctx, slug: str, findings: tuple[str, ...], move: bool) -> None:
     """Add FINDINGS to cluster SLUG."""
-    triage.add_to_cluster(c.conn, slug, list(findings), move)
+    cleared = triage.add_to_cluster(c.conn, slug, list(findings), move)
     click.echo(f"cluster {slug}: +{len(findings)}")
+    _cleared(cleared)
 
 
 @cluster.command("remove")
@@ -653,8 +654,36 @@ def cluster_add(c: Ctx, slug: str, findings: tuple[str, ...], move: bool) -> Non
 @pass_ctx
 def cluster_remove(c: Ctx, slug: str, findings: tuple[str, ...]) -> None:
     """Take FINDINGS out of cluster SLUG."""
-    triage.remove_from_cluster(c.conn, slug, list(findings))
+    cleared = triage.remove_from_cluster(c.conn, slug, list(findings))
     click.echo(f"cluster {slug}: -{len(findings)}")
+    _cleared(cleared)
+
+
+def _cleared(slugs: list[str]) -> None:
+    for s in slugs:
+        click.echo(f"cluster {s}: membership changed, track cleared (decide it again)")
+
+
+@cluster.command("edit")
+@click.argument("slug")
+@click.option("--title")
+@click.option("--rationale")
+@pass_ctx
+def cluster_edit(c: Ctx, slug: str, title: str | None, rationale: str | None) -> None:
+    """Change cluster SLUG's title or rationale."""
+    if title is None and rationale is None:
+        raise click.UsageError("give --title and/or --rationale")
+    triage.edit_cluster(c.conn, slug, title, rationale)
+    click.echo(f"cluster {slug}: updated")
+
+
+@cluster.command("drop")
+@click.argument("slug")
+@pass_ctx
+def cluster_drop(c: Ctx, slug: str) -> None:
+    """Delete cluster SLUG, which must be empty (e.g. after a merge)."""
+    triage.drop_cluster(c.conn, slug)
+    click.echo(f"cluster {slug}: dropped")
 
 
 @cluster.command("track")
@@ -701,6 +730,39 @@ def clusters(c: Ctx, project: str) -> None:
         for f in loose:
             console.print(f"  {f['slug']}  [dim]{f['property'] or ''} {f['attacker'] or ''} "
                           f"{f['title'][:90]}[/dim]")
+
+
+@main.command("triage")
+@click.argument("project")
+@click.option("--json", "as_json", is_flag=True)
+@pass_ctx
+def triage_status(c: Ctx, project: str, as_json: bool) -> None:
+    """What triage has left, step by step, and the next thing to do."""
+    c.project(project)
+    st = triage.status(c.conn, project)
+    if as_json:
+        _emit_json(st)
+        return
+    def line(name: str, items: list, what: str, show) -> None:
+        mark = "[green]done[/green]" if not items else f"[yellow]{len(items)}[/yellow]"
+        console.print(f"[bold]{name:<9}[/bold] {mark}  {what}")
+        for it in items[:12]:
+            console.print(f"            {show(it)}", markup=False)
+        if len(items) > 12:
+            console.print(f"            ... {len(items) - 12} more")
+    line("scope", st["scope"], "verified findings not yet release-scoped", str)
+    line("overlaps", st["overlaps"], "pairs sharing code, one side in no cluster",
+         lambda p: f"{p['a']} / {p['b']}  ({p['kind']}: {', '.join(p['shared'])})")
+    line("cluster", st["cluster"], "verified findings in no cluster", lambda f: f["slug"])
+    line("empty", st["empty"], "clusters with no members", lambda r: r["cluster"])
+    line("track", st["track"], "clusters with no track",
+         lambda r: f"{r['cluster']}  (scope {r['scope'] or 'unscoped'}, {r['members']})")
+    line("check", st["check"], "tracks contradicting their scope",
+         lambda r: f"{r['cluster']}  ({r['track']} but {r['scope']})")
+    console.print(f"[bold]tracked[/bold]   {len(st['tracked'])} clusters ready for write-up")
+    n = st["next"]
+    console.print(f"\nnext: {n['step']} — {n['command']}" if n
+                  else "\ntriage complete; next: write-up and export")
 
 
 @main.command()

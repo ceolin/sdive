@@ -77,6 +77,6 @@ instructions.
   snapshots), `units.py` (tree-sitter extraction), `db.py` (schema, append-only
   migrations), `schemas.py` (agent result models), `ledger.py` (queue, record, briefs,
   reports), `bench.py` (ground truth, scoring), `carry.py` (findings across
-  ledgers), `triage.py` (clusters, release scoping), `blind.py` (agent
+  ledgers), `triage.py` (clusters, release scoping, triage status), `blind.py` (agent
   blindness hook), `launch.py` (`sdive run`), `cli.py`. Agents and skills:
   `.claude/agents/`, `.claude/skills/`; lenses: `projects/<p>/lenses/`.

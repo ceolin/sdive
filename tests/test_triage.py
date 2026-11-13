@@ -152,3 +152,52 @@ def test_overlaps(scoped):
     assert (out[("a", "d")]["kind"], out[("a", "d")]["shared"]) == (
         "function", ["src/parser.c parse"])
     assert list(out)[-1] == ("a", "b")   # same-cluster pairs last
+
+
+def test_track_cleared_on_membership_change(scoped):
+    conn, snap, _ = scoped
+    for s in ("a", "b", "c"):
+        add_finding(conn, snap, s, [("src/parser.c", 3, 6)])
+    triage.new_cluster(conn, "demo", "one", "One", None, ["a", "b"])
+    triage.new_cluster(conn, "demo", "two", "Two", None, ["c"])
+    triage.set_track(conn, "one", "advisory", "shipped")
+    triage.set_track(conn, "two", "advisory", "shipped")
+    assert triage.add_to_cluster(conn, "one", ["a"]) == []   # no change, track kept
+    assert triage.add_to_cluster(conn, "two", ["b"], move=True) == ["one", "two"]
+    assert triage.cluster_report(conn, "one")["track"] is None
+
+    with pytest.raises(ledger.LedgerError, match="still holds"):
+        triage.drop_cluster(conn, "one")
+    triage.edit_cluster(conn, "two", "Two, merged", None)
+    triage.add_to_cluster(conn, "two", ["a"], move=True)
+    triage.drop_cluster(conn, "one")
+    rep = triage.cluster_report(conn, "two")
+    assert (rep["title"], len(rep["members"])) == ("Two, merged", 3)
+
+
+def test_status(scoped):
+    conn, snap, mirror = scoped
+    add_finding(conn, snap, "a", [("src/parser.c", 3, 6)])
+    add_finding(conn, snap, "b", [("src/parser.c", 5, 5)])
+    nxt = lambda: (triage.status(conn, "demo")["next"] or {}).get("step")  # noqa: E731
+    assert nxt() == "scope"
+    rel = triage.Releases(mirror)
+    for i in triage.scope_targets(conn, "demo", [], redo=False):
+        triage.scope_finding(conn, mirror, rel, i)
+    assert nxt() == "overlaps"
+    triage.new_cluster(conn, "demo", "aa", "A", None, ["a"])
+    st = triage.status(conn, "demo")
+    assert st["overlaps"][0]["b"] == "b" and st["cluster"] == [{"slug": "b", "title": "B"}]
+    triage.new_cluster(conn, "demo", "bb", "B", None, ["b"])   # pair decided: apart
+    assert nxt() == "track"
+    triage.set_track(conn, "aa", "plain-fix", "wrongly")       # scope says released
+    triage.set_track(conn, "bb", "advisory", "in v1.0.0")
+    st = triage.status(conn, "demo")
+    assert [r["cluster"] for r in st["check"]] == ["aa"] and st["next"]["step"] == "check"
+    triage.add_to_cluster(conn, "bb", ["a"], move=True)
+    assert nxt() == "empty"
+    triage.drop_cluster(conn, "aa")
+    assert nxt() == "track"   # bb's membership changed
+    triage.set_track(conn, "bb", "advisory", "in v1.0.0")
+    st = triage.status(conn, "demo")
+    assert st["next"] is None and [r["cluster"] for r in st["tracked"]] == ["bb"]

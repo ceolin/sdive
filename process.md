@@ -32,15 +32,9 @@ sdive run <p> [auto|sweep|dive|verify] [LENS] [--minutes M]
 sdive coverage <p>
 sdive findings <p>
 
-# 4. Triage
-sdive findings <p> --status verified
-sdive overlaps <p>
-sdive finding show <slug>
-sdive finding set <slug> --status duplicate --of <orig>
-sdive cluster new <p> <cluster> <slug>... --title T [--rationale R]
-sdive scope <p>
-sdive cluster track <cluster> advisory|plain-fix --note N
-sdive clusters <p>
+# 4. Triage (interactive: proposes each decision, records what you approve)
+/sdive-triage <p>
+    (status at any time: sdive triage <p>; the commands it uses are in §4)
 
 # 5. Write up and export (to build)
 /sdive-writeup <cluster>
@@ -70,11 +64,10 @@ flowchart TD
     verify -->|rejected / duplicate| done1[kept with reasoning]
     verify -->|verified| triage
 
-    subgraph triage ["Triage"]
-        overlap["Overlap candidates<br/>sdive overlaps"] --> dup["Merge missed duplicates"]
-        dup --> cluster["Cluster: one fix each"]
-        cluster --> scope["Release scoping<br/>blame vs vX.Y.Z tags"]
-        scope --> track{"Track"}
+    subgraph triage ["Triage: /sdive-triage"]
+        scope["1. Shipped?<br/>release scoping"] --> dup["2. Same bug?<br/>overlaps, duplicates"]
+        dup --> cluster["3. One fix closes what?<br/>clusters"]
+        cluster --> track{"4. Track"}
     end
 
     track -->|advisory: shipped| export
@@ -180,18 +173,68 @@ fixed`. Rejections and duplicates keep their reasoning.
 
 ## 4. Triage
 
-Turns verified findings into units of work: one fix PR, and one advisory, per
-**cluster**.
+Turns verified findings into **clusters**: the findings one fix closes. A
+cluster is the unit of one fix PR, one advisory and one CVE. Triage answers
+four questions about each verified finding, in this order:
 
-| Step | Command |
+1. **Did the buggy code ship in a release?** Release scoping, deterministic.
+2. **Is it the same bug as another finding?** Missed duplicates, judgement.
+3. **Which fix closes it, and what else does that fix close?** Clusters,
+   judgement.
+4. **Advisory or plain fix?** The cluster's track, your decision, normally
+   following from 1.
+
+**How to run it:** `/sdive-triage <p>`, in an interactive session. It works
+through `sdive triage`'s steps in order, reads the claims and the code,
+proposes each decision as the exact command plus a short reason (in batches
+of up to six), and runs only what you approve. Stop any time; the next run
+picks up where the ledger stands. `sdive triage <p>` alone shows what's left.
+
+### The steps `sdive triage` tracks
+
+| Step | Left when | What decides it |
+|---|---|---|
+| `scope` | a verified finding has no release scoping at its snapshot | nothing: `sdive mirror <p>` then `sdive scope <p>` |
+| `overlaps` | two verified findings share lines (or a function) and at least one is in no cluster; once both are clustered the pair counts as decided | read both claims: **duplicate** (one defect, described twice), **one fix** (same cluster) or **separate** (distinct defects in shared code, which is common) |
+| `cluster` | a verified finding is in no cluster | join an existing cluster or start one (the CVE counting rule below) |
+| `empty` | a cluster has no members (after a merge or a duplicate) | drop it |
+| `track` | a cluster has no track | its shape first (split? merge?), then the track from its scope |
+| `check` | a track contradicts its scope (`advisory` but `post-release`, `plain-fix` but `released`) | decide the track again |
+
+**The CVE counting rule.** Zephyr, MCUboot's CNA, wants one CVE per
+independently fixable flaw. Join findings in a cluster only when one natural
+change *necessarily* fixes them all; if the fixes could land separately, they
+are separate clusters. Most clusters hold one finding.
+
+**Release scoping** blames each finding's locations at its snapshot
+(`git blame -w -M -C`) and maps each commit to the first `vX.Y.Z` tag holding
+it. Verdicts: `released` (every flagged line, as it reads now, was in the
+latest release), `post-release` (none was), `mixed` (read the post-release
+commits: they are often changes around the defect, not the defect itself),
+`unknown` (nothing blamable, e.g. a submodule path). `as_is_since` is an upper
+bound on when the bug arrived, not the advisory's floor.
+
+**Track** follows the disclosure policy in `PLAN.md`: code that shipped in a
+release → `advisory`; merged since the last release and never shipped →
+`plain-fix` (an ordinary fix, no GHSA or CVE). The note records the evidence.
+Changing a cluster's membership clears its track, since the decision was about
+a different set of findings.
+
+### Commands (what the skill runs; usable directly)
+
+| Command | Does |
 |---|---|
-| **See what you have.** The verified findings, with their slugs: every later command names findings by slug. | `sdive findings <p> --status verified` |
-| **Find candidates.** Pairs of verified findings that share lines of a file (or, failing that, a function), most telling first; pairs already in one cluster come last. Sharing code is only a lead: distinct bugs often sit in the same lines. Read both claims to decide whether a pair is one bug (a duplicate), two bugs one fix closes (one cluster), or neither. | `sdive overlaps <p> [--json]`, then `sdive finding show <slug>` for each side |
-| **Merge missed duplicates.** The verifier catches most duplicates; the rest are marked by hand. `<slug>` is the copy, `<orig>` the one to keep (normally the better-written or earlier claim). The duplicate leaves any cluster. | `sdive finding set <slug> --status duplicate --of <orig> [--note N]` |
-| **Cluster.** Group the verified findings that one natural fix closes, with a rationale. Most clusters hold one finding. Zephyr's CNA counting rules want one CVE per independently fixable flaw, so join findings only when one change necessarily fixes them all. | `sdive cluster new <p> <cluster> <slug>... --title T [--rationale R]`, `cluster add` / `remove` (`--move` takes a finding from another cluster) |
-| **Release scoping.** Blames each finding's locations at its snapshot (`git blame -w -M -C`) and maps each commit to the first `vX.Y.Z` tag holding it. Verdicts: `released` (every flagged line, as it reads now, was in the latest release), `post-release` (none was), `mixed` (read the post-release commits: they are often changes around the defect, not the defect itself), `unknown` (nothing blamable, e.g. a submodule path). `as_is_since` is an upper bound on when the bug arrived, not the advisory's floor. Run `sdive mirror` first to pick up new tags. | `sdive scope <p> [slug...] [--redo] [--json]` |
-| **Track.** A human decision, recorded with its reason, following the disclosure policy in `PLAN.md`: code that shipped in a release → `advisory`; merged since the last release and never shipped → `plain-fix` (an ordinary fix, no GHSA or CVE). | `sdive cluster track <cluster> advisory\|plain-fix --note N` |
-| **Review.** | `sdive clusters <p>` (clusters with track, combined scope and release range, then verified findings in no cluster); `sdive cluster show <cluster>` (JSON) |
+| `sdive triage <p> [--json]` | What's left at each step, and the next thing to do. |
+| `sdive findings <p> --status verified` | The verified findings and their slugs. |
+| `sdive finding show <slug>` | One finding: claim, locations, history (JSON). |
+| `sdive overlaps <p> [--json]` | Pairs of verified findings sharing lines (or, failing that, a function); pairs in one cluster last. |
+| `sdive scope <p> [slug...] [--redo] [--json]` | Release scoping; `--json` lists each location's blamed commits, marked `post_release`. |
+| `sdive finding set <slug> --status duplicate --of <orig> [--note N]` | Marks `<slug>` a duplicate of `<orig>` (the one kept); it leaves any cluster. |
+| `sdive cluster new <p> <cluster> <slug>... --title T [--rationale R] [--move]` | Starts a cluster. |
+| `sdive cluster add <cluster> <slug>... [--move]` / `cluster remove <cluster> <slug>...` | Changes membership (`--move` takes a finding from another cluster). |
+| `sdive cluster edit <cluster> [--title T] [--rationale R]` / `cluster drop <cluster>` | Edits a cluster; deletes an empty one. |
+| `sdive cluster track <cluster> advisory\|plain-fix --note N` | Records the track and its evidence. |
+| `sdive clusters <p>` / `sdive cluster show <cluster>` | Clusters with track, combined scope and release range, then findings in none; one cluster as JSON. |
 
 ## 5. Write up and export (to build)
 

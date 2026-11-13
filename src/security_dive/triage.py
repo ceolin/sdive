@@ -81,29 +81,65 @@ def new_cluster(conn: sqlite3.Connection, project: str, slug: str, title: str,
     return cur.lastrowid
 
 
-def _assign(conn: sqlite3.Connection, cluster_id: int | None, findings: list[str]) -> None:
+def _assign(conn: sqlite3.Connection, cluster_id: int | None, findings: list[str]) -> list[str]:
+    """Move findings into cluster_id (None: out of any). A track was decided
+    for a set of findings, so every cluster whose membership changes loses its
+    track and must be decided again. Returns the clusters whose track was cleared."""
+    touched: set[int] = set()
     for s in findings:
+        old = conn.execute("SELECT cluster_id FROM findings WHERE slug = ?", (s,)).fetchone()
+        if old["cluster_id"] == cluster_id:
+            continue
+        touched |= {old["cluster_id"], cluster_id} - {None}
         conn.execute("UPDATE findings SET cluster_id = ?, updated_at = ? WHERE slug = ?",
                      (cluster_id, now(), s))
+    cleared = []
+    for cid in touched:
+        r = conn.execute("SELECT slug, track FROM clusters WHERE id = ?", (cid,)).fetchone()
+        if r["track"]:
+            cleared.append(r["slug"])
+        conn.execute("UPDATE clusters SET track = NULL, track_note = NULL, updated_at = ? "
+                     "WHERE id = ?", (now(), cid))
+    return sorted(cleared)
 
 
 def add_to_cluster(conn: sqlite3.Connection, slug: str, findings: list[str],
-                   move: bool = False) -> None:
+                   move: bool = False) -> list[str]:
     c = _cluster(conn, slug)
     _members_ok(conn, c["project"], findings, c["id"], move)
     with conn:
-        _assign(conn, c["id"], findings)
-        conn.execute("UPDATE clusters SET updated_at = ? WHERE id = ?", (now(), c["id"]))
+        return _assign(conn, c["id"], findings)
 
 
-def remove_from_cluster(conn: sqlite3.Connection, slug: str, findings: list[str]) -> None:
+def remove_from_cluster(conn: sqlite3.Connection, slug: str, findings: list[str]) -> list[str]:
     c = _cluster(conn, slug)
     for s in findings:
         f = conn.execute("SELECT cluster_id FROM findings WHERE slug = ?", (s,)).fetchone()
         if f is None or f["cluster_id"] != c["id"]:
             raise LedgerError(f"{s} is not in cluster {slug}")
     with conn:
-        _assign(conn, None, findings)
+        return _assign(conn, None, findings)
+
+
+def edit_cluster(conn: sqlite3.Connection, slug: str, title: str | None,
+                 rationale: str | None) -> None:
+    c = _cluster(conn, slug)
+    if title is not None and not title.strip():
+        raise LedgerError("a cluster needs a title")
+    with conn:
+        conn.execute("UPDATE clusters SET title = coalesce(?, title), "
+                     "rationale = coalesce(?, rationale), updated_at = ? WHERE id = ?",
+                     (title, rationale, now(), c["id"]))
+
+
+def drop_cluster(conn: sqlite3.Connection, slug: str) -> None:
+    """Delete an empty cluster (e.g. after merging it into another)."""
+    c = _cluster(conn, slug)
+    n = conn.execute("SELECT count(*) FROM findings WHERE cluster_id = ?", (c["id"],)).fetchone()[0]
+    if n:
+        raise LedgerError(f"cluster {slug} still holds {n} findings; move or remove them first")
+    with conn:
+        conn.execute("DELETE FROM clusters WHERE id = ?", (c["id"],))
 
 
 def set_track(conn: sqlite3.Connection, slug: str, track: str, note: str) -> None:
@@ -186,6 +222,52 @@ def overlaps(conn: sqlite3.Connection, project: str) -> list[dict]:
                 p["shared"].append(where)
     return sorted(pairs.values(), key=lambda p: (p["same_cluster"], p["kind"] != "lines",
                                                  p["a"], p["b"]))
+
+
+def status(conn: sqlite3.Connection, project: str) -> dict:
+    """What triage has left, step by step, and the next thing to do.
+
+    Steps, in order: scope (deterministic), overlaps (pairs of verified
+    findings sharing code with at least one side in no cluster: once both are
+    clustered the pair counts as decided), cluster (verified findings in no
+    cluster), empty (clusters left with no members), track (clusters with no
+    track), check (a track that contradicts the members' scope)."""
+    unscoped = [r["slug"] for r in conn.execute(
+        "SELECT f.slug FROM findings f LEFT JOIN finding_scope s "
+        "ON s.finding_id = f.id AND s.snapshot_id = f.snapshot_id "
+        "WHERE f.project = ? AND f.status IN ('verified', 'exported') "
+        "AND s.finding_id IS NULL ORDER BY f.id", (project,))]
+    loose = unclustered(conn, project)
+    loose_slugs = {f["slug"] for f in loose}
+    open_pairs = [p for p in overlaps(conn, project)
+                  if p["a"] in loose_slugs or p["b"] in loose_slugs]
+    empty, untracked, check, done = [], [], [], []
+    for c in conn.execute("SELECT * FROM clusters WHERE project = ? ORDER BY id", (project,)):
+        members = cluster_members(conn, c["id"])
+        scope = combine([m["scope"] for m in members])
+        row = {"cluster": c["slug"], "title": c["title"], "members": len(members),
+               "scope": scope, "track": c["track"]}
+        if not members:
+            empty.append(row)
+        elif not c["track"]:
+            untracked.append(row)
+        elif (c["track"], scope) in (("advisory", "post-release"), ("plain-fix", "released")):
+            check.append(row)
+        else:
+            done.append(row)
+    steps = [
+        ("scope", unscoped, f"sdive mirror {project} && sdive scope {project}"),
+        ("overlaps", open_pairs, f"sdive overlaps {project}; decide each pair"),
+        ("cluster", [{"slug": f["slug"], "title": f["title"]} for f in loose],
+         f"sdive cluster new {project} ... / sdive cluster add ..."),
+        ("empty", empty, "sdive cluster drop <cluster>"),
+        ("track", untracked, "sdive cluster track <cluster> advisory|plain-fix --note N"),
+        ("check", check, "re-decide: sdive cluster track <cluster> ... --note N"),
+    ]
+    nxt = next(({"step": name, "count": len(items), "command": cmd}
+                for name, items, cmd in steps if items), None)
+    return {"project": project, **{name: items for name, items, _ in steps},
+            "tracked": done, "next": nxt}
 
 
 # --- release scoping -------------------------------------------------------

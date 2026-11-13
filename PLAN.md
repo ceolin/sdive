@@ -250,6 +250,12 @@ Second tier afterwards: the other ports (espressif, cypress, nuttx, mynewt, mbed
 From a verified finding to an advisory and a fix. The state stays in the sdive
 ledger; zepsec consumes a local export and reports back through a status file.
 
+Triage (steps 1–2) is driven by the `/sdive-triage` skill: `sdive triage`
+reports what is left (scope, overlap pairs, unclustered findings, empty
+clusters, untracked clusters, tracks contradicting scope); the skill proposes
+each decision with evidence and records only what the user approves. Changing
+a cluster's membership clears its track.
+
 1. **Consolidate.** Duplicates the verifier missed are marked by hand
    (`sdive finding set S --status duplicate --of ORIG`). Verified findings are
    grouped into **clusters** (`sdive cluster new|add|remove`): findings one fix
