@@ -295,7 +295,7 @@ version of an exported cluster makes it `approved` again, ready to re-export.
 
 | Command | Does |
 |---|---|
-| `sdive writeups <p> [--json]` | Each tracked cluster's state, write-up version, exported version and severity. |
+| `sdive writeups <p> [--json]` | Each tracked cluster (the slugs `/sdive-writeup` takes) with its state, write-up version, exported version, severity and title. |
 | `sdive writeup brief <cluster> [--feedback F]` | Writes the writer's brief to staging and prints it. |
 | `sdive writeup record <cluster> [--file F]` | Validates the writer's result and stores a new version. |
 | `sdive writeup show <cluster> [--version N] [--json]` | The draft as it will be exported. |

@@ -322,7 +322,8 @@ def status(conn: sqlite3.Connection, project: str) -> list[dict]:
         exp = conn.execute(
             "SELECT e.*, w.version FROM exports e JOIN writeups w ON w.id = e.writeup_id "
             "WHERE e.cluster_id = ? ORDER BY e.id DESC", (c["id"],)).fetchone()
-        row = {"cluster": c["slug"], "track": c["track"], "members": len(members),
+        row = {"cluster": c["slug"], "title": c["title"], "track": c["track"],
+               "members": len(members),
                "version": w["version"] if w else None,
                "exported_version": exp["version"] if exp else None,
                "severity": json.loads(w["content"])["severity"] if w else None}

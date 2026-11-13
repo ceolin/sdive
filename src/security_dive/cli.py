@@ -1017,15 +1017,10 @@ def writeups(c: Ctx, project: str, as_json: bool) -> None:
     if as_json:
         _emit_json(rows)
         return
-    cols = ("cluster", "track", "n", "state", "version", "exported", "severity")
-    cells = [(r["cluster"], r["track"], str(r["members"]), r["state"], str(r["version"] or ""),
-              str(r["exported_version"] or ""), r["severity"] or "") for r in rows]
-    t = Table()
-    for i, col in enumerate(cols):
-        t.add_column(col, no_wrap=True, min_width=max([len(col)] + [len(x[i]) for x in cells]))
-    for x in cells:
-        t.add_row(*x)
-    console.print(t)
+    console.print(_titled_table(
+        ("cluster", "track", "n", "state", "version", "exported", "severity"),
+        [(r["cluster"], r["track"], str(r["members"]), r["state"], str(r["version"] or ""),
+          str(r["exported_version"] or ""), r["severity"] or "", r["title"]) for r in rows]))
     counts = defaultdict(int)
     for r in rows:
         counts[r["state"]] += 1
