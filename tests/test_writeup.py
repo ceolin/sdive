@@ -124,3 +124,20 @@ def test_plain_fix_needs_unreportable(cfg, scoped):  # noqa: F811
         writeup.record(conn, cfg, "parse-len")
     stage(cfg, result(reportable=False, reportable_reason="post-release-only: since v1.0.0"))
     assert writeup.record(conn, cfg, "parse-len")["version"] == 1
+
+
+def test_status_priority(scoped):  # noqa: F811
+    conn, snap, _ = scoped
+    for slug, vec, atk in [("low", "CVSS:3.1/AV:P/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N", "A3"),
+                           ("high", "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "A2"),
+                           ("tie3", "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "A3"),
+                           ("tie1", "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "A1")]:
+        add_finding(conn, snap, slug, [("src/parser.c", 3, 6)])
+        conn.execute("UPDATE findings SET severity = ?, attacker = ? WHERE slug = ?",
+                     (vec, atk, slug))
+        triage.new_cluster(conn, "demo", f"c-{slug}", slug, None, [slug])
+        triage.set_track(conn, f"c-{slug}", "advisory", "released")
+    conn.commit()
+    rows = writeup.status(conn, "demo")
+    assert [r["cluster"] for r in rows] == ["c-high", "c-tie1", "c-tie3", "c-low"]
+    assert (rows[0]["score"], rows[0]["attacker"]) == (7.8, "A2")

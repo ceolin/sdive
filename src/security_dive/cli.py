@@ -1010,17 +1010,19 @@ def writeup_approve(c: Ctx, cluster: str, version: int | None, note: str | None)
 @click.option("--json", "as_json", is_flag=True)
 @pass_ctx
 def writeups(c: Ctx, project: str, as_json: bool) -> None:
-    """Tracked clusters between triage and export: needs-writeup, stale, draft,
-    approved, exported."""
+    """Tracked clusters between triage and export, highest priority first:
+    needs-writeup, stale, draft, approved, exported."""
     c.project(project)
     rows = writeup.status(c.conn, project)
     if as_json:
         _emit_json(rows)
         return
     console.print(_titled_table(
-        ("cluster", "track", "n", "state", "version", "exported", "severity"),
-        [(r["cluster"], r["track"], str(r["members"]), r["state"], str(r["version"] or ""),
-          str(r["exported_version"] or ""), r["severity"] or "", r["title"]) for r in rows]))
+        ("#", "cluster", "score", "atk", "track", "n", "state", "version", "exported"),
+        [(str(i), r["cluster"], "" if r["score"] is None else f"{r['score']:.1f}",
+          r["attacker"] or "", r["track"], str(r["members"]), r["state"],
+          str(r["version"] or ""), str(r["exported_version"] or ""), r["title"])
+         for i, r in enumerate(rows, 1)]))
     counts = defaultdict(int)
     for r in rows:
         counts[r["state"]] += 1

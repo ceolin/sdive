@@ -308,27 +308,45 @@ def approve(conn: sqlite3.Connection, slug: str, version: int | None, note: str 
 # --- status ----------------------------------------------------------------
 
 
+def _score(vector: str | None) -> float | None:
+    try:
+        return cvss31(vector) if vector else None
+    except LedgerError:
+        return None
+
+
 def status(conn: sqlite3.Connection, project: str) -> list[dict]:
-    """Per tracked cluster: where it stands between triage and export.
+    """Per tracked cluster: where it stands between triage and export, in
+    priority order.
 
     state: needs-writeup | stale (membership changed since the latest write-up) |
     draft (latest not approved) | approved (latest approved, not exported at that
-    version) | exported."""
+    version) | exported.
+
+    Priority is the CVSS score: the latest write-up's, else the highest of the
+    members' verifier vectors; ties go to the weaker attacker class (A1 first),
+    then to the older cluster."""
     out = []
     for c in conn.execute("SELECT * FROM clusters WHERE project = ? AND track IS NOT NULL "
                           "ORDER BY id", (project,)):
-        members = sorted(m["slug"] for m in triage.cluster_members(conn, c["id"]))
+        rows = triage.cluster_members(conn, c["id"])
+        if not rows:
+            continue
+        members = sorted(m["slug"] for m in rows)
         w = latest(conn, c["id"])
+        content = json.loads(w["content"]) if w else None
         exp = conn.execute(
             "SELECT e.*, w.version FROM exports e JOIN writeups w ON w.id = e.writeup_id "
             "WHERE e.cluster_id = ? ORDER BY e.id DESC", (c["id"],)).fetchone()
+        scores = [s for s in (_score(m["severity"]) for m in rows) if s is not None]
+        score = content["cvss_score"] if content else (max(scores) if scores else None)
+        attacker = (content or {}).get("attacker_class") or min(
+            (m["attacker"] for m in rows if m["attacker"]), default=None)
         row = {"cluster": c["slug"], "title": c["title"], "track": c["track"],
-               "members": len(members),
+               "members": len(members), "score": score, "attacker": attacker,
                "version": w["version"] if w else None,
                "exported_version": exp["version"] if exp else None,
-               "severity": json.loads(w["content"])["severity"] if w else None}
-        if not members:
-            continue
+               "severity": content["severity"] if content else None}
         if w is None:
             row["state"] = "needs-writeup"
         elif json.loads(w["members"]) != members:
@@ -340,6 +358,8 @@ def status(conn: sqlite3.Connection, project: str) -> list[dict]:
         else:
             row["state"] = "exported"
         out.append(row)
+    # Stable sort: cluster id order breaks the remaining ties.
+    out.sort(key=lambda r: (-(r["score"] or 0), r["attacker"] or "A9"))
     return out
 
 

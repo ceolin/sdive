@@ -19,7 +19,10 @@ subcommand; it is left out here for brevity.
 
 ## Where things stand
 
-`uv run sdive writeups <project> --json` gives each tracked cluster's `state`:
+`uv run sdive writeups <project> --json` lists the tracked clusters in
+priority order (CVSS score: the write-up's once there is one, else the highest
+of the members' verifier vectors; ties to the weaker attacker class), each
+with its `state`:
 
 - `needs-writeup` / `stale` (its membership changed since the last draft) →
   draft it (below).
@@ -28,8 +31,9 @@ subcommand; it is left out here for brevity.
 - `exported` → done; re-export only after a new version is approved.
 
 Work through the named clusters, or the first `N` that are not `exported`, in
-the listed order. If none are named and there is no count, tell the user how
-many are in each state and propose a batch (about six) before starting.
+that priority order (so `1` is the most severe cluster still to do). If none
+are named and there is no count, tell the user how many are in each state and
+propose a batch (about six) before starting.
 
 ## Draft
 
