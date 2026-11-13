@@ -33,6 +33,9 @@ sdive coverage <p>
 sdive findings <p>
 
 # 4. Triage
+sdive findings <p> --status verified
+sdive overlaps <p>
+sdive finding show <slug>
 sdive finding set <slug> --status duplicate --of <orig>
 sdive cluster new <p> <cluster> <slug>... --title T [--rationale R]
 sdive scope <p>
@@ -68,7 +71,8 @@ flowchart TD
     verify -->|verified| triage
 
     subgraph triage ["Triage"]
-        dup["Merge missed duplicates"] --> cluster["Cluster: one fix each"]
+        overlap["Overlap candidates<br/>sdive overlaps"] --> dup["Merge missed duplicates"]
+        dup --> cluster["Cluster: one fix each"]
         cluster --> scope["Release scoping<br/>blame vs vX.Y.Z tags"]
         scope --> track{"Track"}
     end
@@ -181,7 +185,9 @@ Turns verified findings into units of work: one fix PR, and one advisory, per
 
 | Step | Command |
 |---|---|
-| **Merge missed duplicates.** The verifier catches most duplicates; the rest are marked by hand, naming the original. The duplicate leaves any cluster. | `sdive finding set <slug> --status duplicate --of <orig> [--note N]` |
+| **See what you have.** The verified findings, with their slugs: every later command names findings by slug. | `sdive findings <p> --status verified` |
+| **Find candidates.** Pairs of verified findings that share lines of a file (or, failing that, a function), most telling first; pairs already in one cluster come last. Sharing code is only a lead: distinct bugs often sit in the same lines. Read both claims to decide whether a pair is one bug (a duplicate), two bugs one fix closes (one cluster), or neither. | `sdive overlaps <p> [--json]`, then `sdive finding show <slug>` for each side |
+| **Merge missed duplicates.** The verifier catches most duplicates; the rest are marked by hand. `<slug>` is the copy, `<orig>` the one to keep (normally the better-written or earlier claim). The duplicate leaves any cluster. | `sdive finding set <slug> --status duplicate --of <orig> [--note N]` |
 | **Cluster.** Group the verified findings that one natural fix closes, with a rationale. Most clusters hold one finding. Zephyr's CNA counting rules want one CVE per independently fixable flaw, so join findings only when one change necessarily fixes them all. | `sdive cluster new <p> <cluster> <slug>... --title T [--rationale R]`, `cluster add` / `remove` (`--move` takes a finding from another cluster) |
 | **Release scoping.** Blames each finding's locations at its snapshot (`git blame -w -M -C`) and maps each commit to the first `vX.Y.Z` tag holding it. Verdicts: `released` (every flagged line, as it reads now, was in the latest release), `post-release` (none was), `mixed` (read the post-release commits: they are often changes around the defect, not the defect itself), `unknown` (nothing blamable, e.g. a submodule path). `as_is_since` is an upper bound on when the bug arrived, not the advisory's floor. Run `sdive mirror` first to pick up new tags. | `sdive scope <p> [slug...] [--redo] [--json]` |
 | **Track.** A human decision, recorded with its reason, following the disclosure policy in `PLAN.md`: code that shipped in a release → `advisory`; merged since the last release and never shipped → `plain-fix` (an ordinary fix, no GHSA or CVE). | `sdive cluster track <cluster> advisory\|plain-fix --note N` |

@@ -503,8 +503,9 @@ def findings(c: Ctx, project: str, status: str | None) -> None:
         (project, status, status),
     ).fetchall()
     t = Table()
-    for col in ("slug", "status", "prop", "atk", "cwe", "conf", "title"):
-        t.add_column(col)
+    for col in ("slug", "status", "prop", "atk", "cwe", "conf"):
+        t.add_column(col, no_wrap=True)
+    t.add_column("title", no_wrap=True, overflow="ellipsis")
     for f in rows:
         t.add_row(f["slug"], f["status"], f["property"] or "", f["attacker"] or "",
                   f["cwe"] or "", f["confidence"] or "", f["title"])
@@ -700,6 +701,28 @@ def clusters(c: Ctx, project: str) -> None:
         for f in loose:
             console.print(f"  {f['slug']}  [dim]{f['property'] or ''} {f['attacker'] or ''} "
                           f"{f['title'][:90]}[/dim]")
+
+
+@main.command()
+@click.argument("project")
+@click.option("--json", "as_json", is_flag=True)
+@pass_ctx
+def overlaps(c: Ctx, project: str, as_json: bool) -> None:
+    """Pairs of verified findings sharing lines (or a function): duplicate or
+    cluster candidates. Pairs already in one cluster are listed last."""
+    pairs = triage.overlaps(c.conn, project)
+    if as_json:
+        _emit_json(pairs)
+        return
+    t = Table()
+    for col in ("finding", "finding", "shares", "where", "same cluster"):
+        t.add_column(col, overflow="fold")
+    for p in pairs:
+        t.add_row(p["a"], p["b"], p["kind"], "\n".join(p["shared"]),
+                  "yes" if p["same_cluster"] else "")
+    console.print(t)
+    if not pairs:
+        click.echo("no overlapping verified findings")
 
 
 @main.command()

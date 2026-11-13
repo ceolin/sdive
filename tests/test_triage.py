@@ -128,3 +128,27 @@ def test_manual_duplicate(scoped):
     assert note == "duplicate of orig: same bug"
     with pytest.raises(ledger.LedgerError, match="itself a duplicate"):
         ledger.set_finding_status(conn, "third", "duplicate", duplicate_of="copy")
+
+
+def test_overlaps(scoped):
+    conn, snap, _ = scoped
+    unit = conn.execute("SELECT id FROM units WHERE path = 'src/parser.c' AND kind = 'function'"
+                        ).fetchone()["id"]
+    add_finding(conn, snap, "a", [("src/parser.c", 3, 6)])
+    add_finding(conn, snap, "b", [("src/parser.c", 5, 9), ("src/util.c", 1, 1)])
+    add_finding(conn, snap, "c", [("src/util.c", 3, 3)])
+    add_finding(conn, snap, "d", [("src/parser.c", 1, 1)])
+    add_finding(conn, snap, "e", [("src/parser.c", 4, 4)], status="hypothesis")
+    conn.execute("UPDATE finding_locations SET unit_id = ?, symbol = 'parse' "
+                 "WHERE path = 'src/parser.c'", (unit,))   # a and d: same function, apart
+    conn.commit()
+    triage.new_cluster(conn, "demo", "ab", "AB", None, ["a", "b"])
+
+    out = {(p["a"], p["b"]): p for p in triage.overlaps(conn, "demo")}
+    assert ("a", "e") not in out and ("b", "c") not in out   # hypothesis; disjoint lines
+    assert out[("a", "b")]["kind"] == "lines" and out[("a", "b")]["shared"] == [
+        "src/parser.c:5-6"]
+    assert out[("a", "b")]["same_cluster"]
+    assert (out[("a", "d")]["kind"], out[("a", "d")]["shared"]) == (
+        "function", ["src/parser.c parse"])
+    assert list(out)[-1] == ("a", "b")   # same-cluster pairs last

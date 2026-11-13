@@ -152,6 +152,42 @@ def unclustered(conn: sqlite3.Connection, project: str) -> list[sqlite3.Row]:
         "AND cluster_id IS NULL ORDER BY id", (project,)).fetchall()
 
 
+def overlaps(conn: sqlite3.Connection, project: str) -> list[dict]:
+    """Pairs of verified findings with a location in common: the same lines of a
+    file, or failing that the same function. Candidates for a missed duplicate
+    or for one cluster; whether they are either is a judgement on the claims."""
+    locs = conn.execute(
+        "SELECT f.id, f.slug, f.cluster_id, l.path, l.start_line, "
+        "coalesce(l.end_line, l.start_line) AS end_line, l.symbol, l.unit_id "
+        "FROM finding_locations l JOIN findings f ON f.id = l.finding_id "
+        "WHERE f.project = ? AND f.status IN ('verified', 'exported') ORDER BY f.id",
+        (project,)).fetchall()
+    pairs: dict[tuple[int, int], dict] = {}
+    for i, a in enumerate(locs):
+        for b in locs[i + 1:]:
+            if a["id"] == b["id"] or a["path"] != b["path"]:
+                continue
+            lo, hi = max(a["start_line"], b["start_line"]), min(a["end_line"], b["end_line"])
+            if lo <= hi:
+                kind, where = "lines", f"{a['path']}:{lo}" + (f"-{hi}" if hi > lo else "")
+            elif a["unit_id"] is not None and a["unit_id"] == b["unit_id"]:
+                kind, where = "function", f"{a['path']} {a['symbol'] or ''}".strip()
+            else:
+                continue
+            key = (a["id"], b["id"]) if a["id"] < b["id"] else (b["id"], a["id"])
+            first, second = (a, b) if a["id"] < b["id"] else (b, a)
+            p = pairs.setdefault(key, {
+                "a": first["slug"], "b": second["slug"], "kind": kind, "shared": [],
+                "same_cluster": first["cluster_id"] is not None
+                and first["cluster_id"] == second["cluster_id"]})
+            if kind == "lines" and p["kind"] == "function":
+                p["kind"], p["shared"] = "lines", []
+            if kind == p["kind"] and where not in p["shared"]:
+                p["shared"].append(where)
+    return sorted(pairs.values(), key=lambda p: (p["same_cluster"], p["kind"] != "lines",
+                                                 p["a"], p["b"]))
+
+
 # --- release scoping -------------------------------------------------------
 
 
