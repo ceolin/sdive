@@ -51,7 +51,9 @@ Planned skills / agents (names provisional):
 | `/sdive-dive` | `sdive-auditor` | deep dive on one unit / entry point, following data flow |
 | `/sdive-verify` | `sdive-verifier` | **blind**, adversarial refutation of one hypothesis |
 | `/sdive-change` | `sdive-change-reviewer` | review a commit range or PR head against the dossiers |
-| `/sdive-triage` | `sdive-triager` (cheap model) | Zephyr attack-surface scoring of units |
+| `/sdive-rank` | `sdive-ranker` (cheap model) | Zephyr attack-surface scoring of units |
+| `/sdive-triage` | none (interactive) | built: verified findings → clusters with a track |
+| `/sdive-writeup` | `sdive-writer` | built: advisory draft per cluster, review, export |
 
 ## Core data model — units, lenses, the ledger
 
@@ -283,7 +285,8 @@ a cluster's membership clears its track.
    `analysis/exports/<p>/<cluster>/`: `cluster.json` (schema
    `sdive-export/1`: the verdict fields at the top level so zepsec reads it as
    a `result.json`, plus `cvss_score`, track, snapshot `sha`, members with
-   claims, locations, verify runs, scope and `carried_from`, and provenance)
+   claims, locations, verify runs, scope and `carried_from`, and provenance,
+   including the models that found and verified the members, for credit)
    and `cluster.md`. Findings move to `exported`; each export is recorded
    (`exports` table). Built from the ledger alone: never truth-set content.
 5. **zepsec, client side** (zepsec's work): a local intake channel reads the
@@ -313,12 +316,23 @@ a cluster's membership clears its track.
   actually built. Code nothing realistic builds sinks to the bottom. *Which
   configs count as representative is deferred to a discussion with the Zephyr
   security team.*
-- `/sdive-triage` (cheap subagent) scores units for attacker reachability and
+- `/sdive-rank` (cheap subagent) scores units for attacker reachability and
   parsing/length arithmetic; Mythos time goes to the top of the queue.
   Priority surfaces: IP/TCP/DNS, LwM2M/CoAP/MQTT, Bluetooth host + controller,
   USB device classes, the userspace syscall boundary (`z_vrfy_*`), drivers fed by
   external buses.
 - Coverage reporting per area and lens.
+- **Write-up per project.** The write-up step is MCUboot-flavoured: the
+  `WriteupResult` schema fixes `property_violated` to P1–P6 and
+  `attacker_class` to A1–A3, and the `sdive-writer` prompt carries MCUboot's
+  attack-vector guidance, reachable-surface vocabulary and `MCUBOOT_*`
+  configuration examples, and produces the `mcuboot-deep-analyst` field set.
+  Before the first Zephyr write-up: take the property and attacker values
+  from the project's threat model (or drop them where it has none), give the
+  writer per-project guidance (Zephyr's surfaces: network, Bluetooth, USB,
+  syscalls; Kconfig and boards), and emit the `zepsec-deep-analyst` field
+  set for Zephyr. zepsec's intake keys on the export's `project`
+  (`../zepsec/sdive-intake.md`).
 
 ### Phase 5 — Zephyr incremental
 Post-merge change review on `main`, then PRs; possibly sharing the commit walk

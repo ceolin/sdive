@@ -100,6 +100,16 @@ def test_writeup_flow(cfg, scoped):  # noqa: F811
         "sdive-export/1", "Out-of-bounds write in parse()", 7.8)
     assert doc["reportable"] is True and doc["sha"] and doc["members"][0]["slug"] == "a"
     assert doc["provenance"]["writeup_version"] == 2 and doc["provenance"]["exported_at"]
+    assert doc["provenance"]["analysis_models"] == []   # fixture findings have no runs
+    fid = conn.execute("SELECT id FROM findings WHERE slug = 'a'").fetchone()[0]
+    for model, status in (("model-v", "recorded"), ("model-x", "abandoned")):
+        run = conn.execute("INSERT INTO runs (project, kind, snapshot_id, status, model, "
+                           "started_at) VALUES ('demo', 'verify', ?, ?, ?, 'now')",
+                           (snap, status, model)).lastrowid
+        conn.execute("INSERT INTO run_targets (run_id, finding_id) VALUES (?, ?)", (run, fid))
+    conn.commit()
+    assert writeup.document(conn, cfg, "parse-len")["provenance"]["analysis_models"] == [
+        "model-v"]
     assert "# Out-of-bounds write in parse()" in (out / "cluster.md").read_text()
     assert conn.execute("SELECT status FROM findings WHERE slug = 'a'").fetchone()[0] == \
         "exported"

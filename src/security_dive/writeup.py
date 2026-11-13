@@ -372,6 +372,19 @@ def _sdive_commit(cfg: Config) -> str | None:
     return proc.stdout.strip() or None
 
 
+def _analysis_models(conn: sqlite3.Connection, members: list[sqlite3.Row]) -> list[str]:
+    """Models that found and verified the members (for the advisory's credit):
+    the runs that raised them and the verify runs on them, not the writer."""
+    ids = [m["id"] for m in members]
+    marks = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT DISTINCT r.model FROM runs r WHERE r.model IS NOT NULL AND r.status = "
+        f"'recorded' AND (r.id IN (SELECT origin_run_id FROM findings WHERE id IN ({marks})) "
+        f"OR r.id IN (SELECT run_id FROM run_targets WHERE finding_id IN ({marks})))",
+        ids + ids).fetchall()
+    return sorted(r["model"] for r in rows)
+
+
 def document(conn: sqlite3.Connection, cfg: Config, slug: str,
              row: sqlite3.Row | None = None) -> dict:
     """The export document for a cluster's write-up (default: the latest)."""
@@ -403,6 +416,7 @@ def document(conn: sqlite3.Connection, cfg: Config, slug: str,
         "written_at": row["created_at"], "approved_at": row["approved_at"],
         "approval_note": row["approval_note"],
         "origin_runs": sorted({m["origin_run_id"] for m in members if m["origin_run_id"]}),
+        "analysis_models": _analysis_models(conn, members),
         "sdive_commit": _sdive_commit(cfg),
     }
     return doc
@@ -450,6 +464,7 @@ def render_md(doc: dict) -> str:
               f"Write-up v{p['writeup_version']} by {p['written_by']} at {p['written_at']}, "
               f"approved {p['approved_at']}"
               + (f" ({p['approval_note']})" if p.get("approval_note") else "")
+              + f"; found and verified by {', '.join(p['analysis_models']) or 'unrecorded models'}"
               + f"; ledger `{p['ledger']}`, sdive `{(p['sdive_commit'] or '')[:12]}`.", ""]
     return "\n".join(lines)
 

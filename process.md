@@ -280,7 +280,8 @@ a batch. `sdive writeups <p>` shows where every tracked cluster stands.
      tools read it as a `result.json`), plus `cvss_score`, the cluster and its
      track, the snapshot `sha`, the members (claims, locations, verify runs,
      scope, `carried_from`) and provenance (write-up version and approval,
-     origin runs, sdive commit);
+     origin runs, the models that found and verified the members, for the
+     advisory's credit, and the sdive commit);
    - `cluster.md`: the same, readable.
 
    The member findings move to `exported`. The export stays on this machine:
