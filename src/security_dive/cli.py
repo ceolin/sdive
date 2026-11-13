@@ -502,14 +502,25 @@ def findings(c: Ctx, project: str, status: str | None) -> None:
         "SELECT * FROM findings WHERE project = ? AND (? IS NULL OR status = ?) ORDER BY id",
         (project, status, status),
     ).fetchall()
+    console.print(_titled_table(
+        ("slug", "status", "prop", "atk", "cwe", "conf"),
+        [(f["slug"], f["status"], f["property"] or "", f["attacker"] or "", f["cwe"] or "",
+          f["confidence"] or "", f["title"]) for f in rows]))
+
+
+def _titled_table(cols: tuple[str, ...], rows: list[tuple[str, ...]]) -> Table:
+    """A table whose short columns are never wrapped or cut (slugs are what
+    the user types next) and whose last column, the title, is cut to fit."""
+    widths = [max([len(col)] + [len(r[i]) for r in rows]) for i, col in enumerate(cols)]
+    room = max(20, console.width - sum(widths) - 3 * len(cols) - 4)
     t = Table()
-    for col in ("slug", "status", "prop", "atk", "cwe", "conf"):
-        t.add_column(col, no_wrap=True)
-    t.add_column("title", no_wrap=True, overflow="ellipsis")
-    for f in rows:
-        t.add_row(f["slug"], f["status"], f["property"] or "", f["attacker"] or "",
-                  f["cwe"] or "", f["confidence"] or "", f["title"])
-    console.print(t)
+    for col, w in zip(cols, widths, strict=True):
+        t.add_column(col, no_wrap=True, min_width=w)
+    t.add_column("title", no_wrap=True)
+    for r in rows:
+        title = r[-1] if len(r[-1]) <= room else r[-1][:room - 1] + "…"
+        t.add_row(*r[:-1], title)
+    return t
 
 
 @main.command()
@@ -712,18 +723,18 @@ def clusters(c: Ctx, project: str) -> None:
     """List clusters, then verified findings in none."""
     rows = c.conn.execute("SELECT * FROM clusters WHERE project = ? ORDER BY id",
                           (project,)).fetchall()
-    t = Table()
-    for col in ("cluster", "n", "track", "scope", "since", "props", "title"):
-        t.add_column(col)
+    table_rows = []
     for r in rows:
         m = triage.cluster_members(c.conn, r["id"])
         since = sorted({x["as_is_since"] for x in m if x["as_is_since"]},
                        key=triage._version)
-        t.add_row(r["slug"], str(len(m)), r["track"] or "",
-                  triage.combine([x["scope"] for x in m]) or "unscoped",
-                  "..".join(dict.fromkeys([since[0], since[-1]])) if since else "",
-                  ",".join(sorted({x["property"] or "?" for x in m})), r["title"])
-    console.print(t)
+        table_rows.append((
+            r["slug"], str(len(m)), r["track"] or "",
+            triage.combine([x["scope"] for x in m]) or "unscoped",
+            "..".join(dict.fromkeys([since[0], since[-1]])) if since else "",
+            ",".join(sorted({x["property"] or "?" for x in m})), r["title"]))
+    console.print(_titled_table(("cluster", "n", "track", "scope", "since", "props"),
+                                table_rows))
     loose = triage.unclustered(c.conn, project)
     if loose:
         console.print(f"\n{len(loose)} verified findings in no cluster:")
