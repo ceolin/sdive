@@ -27,7 +27,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "verified": {"exported", "fixed", "rejected", "duplicate"},
     "rejected": {"hypothesis"},
     "duplicate": {"hypothesis"},
-    "exported": {"fixed"},
+    "exported": {"fixed", "duplicate"},   # duplicate: of an existing advisory (zepsec)
     "fixed": set(),
 }
 

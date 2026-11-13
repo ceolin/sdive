@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "StatusBackport": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "title": "Line",
+          "type": "string"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pr"
+        },
+        "sha": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha"
+        }
+      },
+      "required": [
+        "line"
+      ],
+      "title": "StatusBackport",
+      "type": "object"
+    },
+    "StatusDedup": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "enum": [
+            "duplicate",
+            "annotate",
+            "distinct",
+            "none"
+          ],
+          "title": "Match",
+          "type": "string"
+        },
+        "advisory": {
+          "anyOf": [
+            {
+              "pattern": "^GHSA(-[0-9a-z]{4}){3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Advisory"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "match"
+      ],
+      "title": "StatusDedup",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "`status.json`: zepsec's report on one export, written beside it.\n\nRules beyond the field types (checked by `sdive sync-status`): state\n`duplicate` needs dedup.match `duplicate` and dedup.advisory; `drafted`\nand `published` need ghsa_id; `fix-open` needs fix_prs; `fix-merged` needs\nfix_shas (40-hex). export_hash must be the hash of a cluster.json sdive\nwrote. sdive moves the members to `fixed` on `fix-merged`, or on\n`published` with fix_shas, and to `duplicate` on `duplicate`.",
+  "properties": {
+    "schema": {
+      "const": "zepsec-status/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "project": {
+      "title": "Project",
+      "type": "string"
+    },
+    "cluster": {
+      "title": "Cluster",
+      "type": "string"
+    },
+    "export_hash": {
+      "description": "First 32 hex chars of sha256(cluster.json) as read",
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Export Hash",
+      "type": "string"
+    },
+    "writeup_version": {
+      "minimum": 1,
+      "title": "Writeup Version",
+      "type": "integer"
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unit"
+    },
+    "state": {
+      "enum": [
+        "received",
+        "duplicate",
+        "drafted",
+        "fix-open",
+        "fix-merged",
+        "published",
+        "declined"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "dedup": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StatusDedup"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "ghsa_id": {
+      "anyOf": [
+        {
+          "pattern": "^GHSA(-[0-9a-z]{4}){3}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ghsa Id"
+    },
+    "cve_id": {
+      "anyOf": [
+        {
+          "pattern": "^CVE-\\d{4}-\\d{4,}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cve Id"
+    },
+    "fix_prs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Fix Prs",
+      "type": "array"
+    },
+    "fix_shas": {
+      "default": [],
+      "description": "40-hex commit SHAs",
+      "items": {
+        "type": "string"
+      },
+      "title": "Fix Shas",
+      "type": "array"
+    },
+    "backports": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/StatusBackport"
+      },
+      "title": "Backports",
+      "type": "array"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "updated_at": {
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "project",
+    "cluster",
+    "export_hash",
+    "writeup_version",
+    "state",
+    "updated_at"
+  ],
+  "title": "ZepsecStatus",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zepsec-status-1.schema.json"
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -108,13 +109,11 @@ class VerifyResult(_Strict):
         return self
 
 
-class WriteupResult(_Strict):
-    """Output of a write-up: the advisory draft for one cluster. The fields up to
-    `rationale` are zepsec's MCUboot verdict (`result.json`) fields, so zepsec's
-    filing tools read the export directly; the rest are sdive's additions."""
+class Verdict(_Strict):
+    """An advisory verdict for one cluster. The fields up to `rationale` are
+    zepsec's MCUboot verdict (`result.json`) fields, so zepsec's filing tools
+    read an export directly; the rest are sdive's additions."""
 
-    cluster: str = Field(description="Cluster slug exactly as given in the brief")
-    model: str = Field(description="Model ID the agent is running as")
     is_vulnerability: Literal["yes", "no", "unclear"]
     property_violated: Literal["P1", "P2", "P3", "P4", "P5", "P6"] | None
     attacker_class: Literal["A1", "A2", "A3"] | None
@@ -145,7 +144,7 @@ class WriteupResult(_Strict):
         default=[], description="What the write-up could not settle from source")
 
     @model_validator(mode="after")
-    def _check(self) -> WriteupResult:
+    def _check_verdict(self) -> Verdict:
         if self.is_vulnerability == "yes":
             missing = [k for k in ("property_violated", "attacker_class", "cwe", "cvss_vector",
                                    "advisory_summary", "advisory_description")
@@ -157,5 +156,162 @@ class WriteupResult(_Strict):
         return self
 
 
+class WriteupResult(Verdict):
+    """Output of a write-up (the sdive-writer agent): the verdict for one cluster."""
+
+    cluster: str = Field(description="Cluster slug exactly as given in the brief")
+    model: str = Field(description="Model ID the agent is running as")
+
+
+# --- the hand-off to zepsec ------------------------------------------------
+# Both documents are a contract with zepsec's client-side intake: change them
+# only by bumping the schema string, and regenerate schemas/ (`sdive schema
+# --write`).
+
+HEX40 = r"^[0-9a-f]{40}$"
+
+
+class ExportVerification(_Strict):
+    run_id: int
+    model: str | None
+    verdict: str | None
+
+
+class ExportMemberScope(_Strict):
+    verdict: Literal["released", "post-release", "mixed", "unknown"] | None = None
+    latest_release: str | None = None
+    as_is_since: str | None = None
+
+
+class ExportMember(_Strict):
+    slug: str
+    title: str
+    claim: str
+    property: str | None
+    attacker: str | None
+    cwe: str | None
+    cvss_vector: str | None = Field(description="The verifier's vector (provenance)")
+    confidence: str | None
+    locations: list[Location]
+    carried_from: str | None = Field(
+        description="'<ledger>:<slug>' when carried in from a benchmark round")
+    verification: list[ExportVerification]
+    scope: ExportMemberScope
+
+
+class ExportSnapshot(_Strict):
+    sha: str = Field(pattern=HEX40)
+    ref: str | None
+
+
+class ExportProvenance(_Strict):
+    ledger: str
+    snapshot: ExportSnapshot
+    writeup_version: int = Field(ge=1)
+    written_by: str | None = Field(description="The writer's model (not credited)")
+    written_at: str
+    approved_at: str
+    approval_note: str | None
+    origin_runs: list[int]
+    analysis_models: list[str] = Field(
+        description="Models that found and verified the members: the ones to credit")
+    sdive_commit: str | None
+    exported_at: str
+
+
+class ExportDocument(Verdict):
+    """`cluster.json`: an approved write-up exported for zepsec."""
+
+    schema_: Literal["sdive-export/1"] = Field(alias="schema")
+    source: Literal["security-dive"]
+    project: str = Field(description="sdive project name; selects zepsec's filing profile")
+    cluster: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
+    title: str
+    track: Literal["advisory", "plain-fix"]
+    track_note: str | None
+    sha: str = Field(pattern=HEX40, description="Commit analysed: not a fix SHA")
+    cvss_score: float | None = Field(ge=0, le=10)
+    members: list[ExportMember] = Field(min_length=1)
+    scope: Literal["released", "post-release", "mixed", "unknown"] | None
+    provenance: ExportProvenance
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class StatusDedup(_Strict):
+    match: Literal["duplicate", "annotate", "distinct", "none"]
+    advisory: str | None = Field(default=None, pattern=r"^GHSA(-[0-9a-z]{4}){3}$")
+    note: str | None = None
+
+
+class StatusBackport(_Strict):
+    line: str
+    pr: str | None = None
+    sha: str | None = Field(default=None, pattern=HEX40)
+
+
+ZEPSEC_STATES = ("received", "duplicate", "drafted", "fix-open", "fix-merged", "published",
+                 "declined")
+
+
+class ZepsecStatus(_Strict):
+    """`status.json`: zepsec's report on one export, written beside it.
+
+    Rules beyond the field types (checked by `sdive sync-status`): state
+    `duplicate` needs dedup.match `duplicate` and dedup.advisory; `drafted`
+    and `published` need ghsa_id; `fix-open` needs fix_prs; `fix-merged` needs
+    fix_shas (40-hex). export_hash must be the hash of a cluster.json sdive
+    wrote. sdive moves the members to `fixed` on `fix-merged`, or on
+    `published` with fix_shas, and to `duplicate` on `duplicate`."""
+
+    schema_: Literal["zepsec-status/1"] = Field(alias="schema")
+    project: str
+    cluster: str
+    export_hash: str = Field(pattern=r"^[0-9a-f]{32}$",
+                             description="First 32 hex chars of sha256(cluster.json) as read")
+    writeup_version: int = Field(ge=1)
+    unit: str | None = None
+    state: Literal["received", "duplicate", "drafted", "fix-open", "fix-merged", "published",
+                   "declined"]
+    dedup: StatusDedup | None = None
+    ghsa_id: str | None = Field(default=None, pattern=r"^GHSA(-[0-9a-z]{4}){3}$")
+    cve_id: str | None = Field(default=None, pattern=r"^CVE-\d{4}-\d{4,}$")
+    fix_prs: list[str] = []
+    fix_shas: list[str] = Field(default=[], description="40-hex commit SHAs")
+    backports: list[StatusBackport] = []
+    notes: str | None = None
+    updated_at: str
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @model_validator(mode="after")
+    def _check_state(self) -> ZepsecStatus:
+        bad = [s for s in self.fix_shas if not re.fullmatch(HEX40, s)]
+        if bad:
+            raise ValueError(f"fix_shas must be 40-hex commit SHAs: {bad}")
+        if self.state == "duplicate" and not (self.dedup and self.dedup.match == "duplicate"
+                                              and self.dedup.advisory):
+            raise ValueError("state duplicate needs dedup.match duplicate and dedup.advisory")
+        if self.state in ("drafted", "published") and not self.ghsa_id:
+            raise ValueError(f"state {self.state} needs ghsa_id")
+        if self.state == "fix-open" and not self.fix_prs:
+            raise ValueError("state fix-open needs fix_prs")
+        if self.state == "fix-merged" and not self.fix_shas:
+            raise ValueError("state fix-merged needs fix_shas")
+        return self
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
-    "audit": AuditResult, "verify": VerifyResult, "writeup": WriteupResult}
+    "audit": AuditResult, "verify": VerifyResult, "writeup": WriteupResult,
+    "export": ExportDocument, "status": ZepsecStatus}
+
+# Contract files committed under schemas/ for zepsec to validate against.
+CONTRACT_FILES = {"export": "sdive-export-1.schema.json", "status": "zepsec-status-1.schema.json"}
+
+
+def contract_schema(kind: str) -> dict:
+    """The JSON Schema of a hand-off document, as committed under schemas/."""
+    schema = SCHEMAS[kind].model_json_schema(by_alias=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = CONTRACT_FILES[kind]
+    return schema

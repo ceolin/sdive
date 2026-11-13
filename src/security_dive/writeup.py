@@ -33,7 +33,7 @@ from pydantic import ValidationError
 from . import repo, triage
 from .config import Config
 from .ledger import LedgerError, _event, _finding_locations, file_hash, now
-from .schemas import WriteupResult
+from .schemas import ExportDocument, WriteupResult, ZepsecStatus
 
 AGENT = "sdive-writer"
 EXPORT_SCHEMA = "sdive-export/1"
@@ -342,8 +342,11 @@ def status(conn: sqlite3.Connection, project: str) -> list[dict]:
         score = content["cvss_score"] if content else (max(scores) if scores else None)
         attacker = (content or {}).get("attacker_class") or min(
             (m["attacker"] for m in rows if m["attacker"]), default=None)
+        zs = conn.execute("SELECT state, ghsa_id FROM cluster_status WHERE cluster_id = ? "
+                          "ORDER BY id DESC", (c["id"],)).fetchone()
         row = {"cluster": c["slug"], "title": c["title"], "track": c["track"],
                "members": len(members), "score": score, "attacker": attacker,
+               "zepsec": zs["state"] if zs else None, "ghsa_id": zs["ghsa_id"] if zs else None,
                "version": w["version"] if w else None,
                "exported_version": exp["version"] if exp else None,
                "severity": content["severity"] if content else None}
@@ -483,6 +486,10 @@ def export(conn: sqlite3.Connection, cfg: Config, slug: str) -> Path:
         raise LedgerError(f"{slug}: members not verified: {', '.join(bad)}")
     doc = document(conn, cfg, slug, row)
     doc["provenance"]["exported_at"] = now()
+    try:   # the export is a contract with zepsec: never write one that breaks it
+        ExportDocument.model_validate(doc)
+    except ValidationError as e:
+        raise LedgerError(f"{slug}: export does not match sdive-export/1:\n{e}") from None
     out = cfg.export_dir(c["project"]) / slug
     out.mkdir(parents=True, exist_ok=True)
     (out / "cluster.json").write_text(json.dumps(doc, indent=2) + "\n")
@@ -498,4 +505,91 @@ def export(conn: sqlite3.Connection, cfg: Config, slug: str) -> Path:
                              "WHERE id = ?", (now(), m["id"]))
                 _event(conn, m["id"], None, "verified", "exported",
                        f"exported with cluster {slug}, write-up v{row['version']}")
+    return out
+
+
+# --- status back from zepsec -----------------------------------------------
+
+
+def _member_rows(conn: sqlite3.Connection, cluster_id: int) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM findings WHERE cluster_id = ? ORDER BY id",
+                        (cluster_id,)).fetchall()
+
+
+def sync_status(conn: sqlite3.Connection, cfg: Config, project: str) -> list[dict]:
+    """Read every export's status.json (written by zepsec) and record changes.
+
+    A status names the export it refers to by hash; one sdive never wrote is
+    refused. Effects on the members: `duplicate` (of an existing advisory)
+    moves exported findings to `duplicate`, with the GHSA id as duplicate_of;
+    `fix-merged` and `published` (with fix SHAs) move them to `fixed`; every
+    other state change is noted in their history. Unchanged files are skipped.
+    """
+    out = []
+    root = cfg.export_dir(project)
+    for path in sorted(root.glob("*/status.json")) if root.is_dir() else []:
+        slug = path.parent.name
+        rep = {"cluster": slug, "action": "unchanged", "problems": []}
+        out.append(rep)
+        try:
+            raw = path.read_text()
+            st = ZepsecStatus.model_validate(json.loads(raw))
+        except (OSError, json.JSONDecodeError, ValidationError) as e:
+            rep["action"], rep["problems"] = "refused", [f"invalid status.json: {e}"]
+            continue
+        if (st.project, st.cluster) != (project, slug):
+            rep["action"] = "refused"
+            rep["problems"].append(f"status is for {st.project}/{st.cluster}, "
+                                   f"found in {project}/{slug}")
+            continue
+        c = conn.execute("SELECT * FROM clusters WHERE slug = ? AND project = ?",
+                         (slug, project)).fetchone()
+        exp = c and conn.execute(
+            "SELECT e.*, w.version FROM exports e JOIN writeups w ON w.id = e.writeup_id "
+            "WHERE e.cluster_id = ? AND e.content_hash = ? ORDER BY e.id DESC",
+            (c["id"], st.export_hash)).fetchone()
+        if not exp:
+            rep["action"] = "refused"
+            rep["problems"].append(f"export_hash {st.export_hash} matches no export of "
+                                   f"{slug} that sdive wrote")
+            continue
+        if exp["version"] != st.writeup_version:
+            rep["problems"].append(f"writeup_version {st.writeup_version} but that export "
+                                   f"is v{exp['version']}")
+        last_exp = conn.execute("SELECT id FROM exports WHERE cluster_id = ? ORDER BY id DESC",
+                                (c["id"],)).fetchone()
+        if last_exp["id"] != exp["id"]:
+            rep["problems"].append("status refers to an older export; zepsec has not "
+                                   "picked up the latest")
+        content = st.model_dump(by_alias=True)
+        prev = conn.execute("SELECT content FROM cluster_status WHERE cluster_id = ? "
+                            "ORDER BY id DESC", (c["id"],)).fetchone()
+        if prev and json.loads(prev["content"]) == content:
+            continue
+        rep["action"] = st.state
+        with conn:
+            conn.execute(
+                "INSERT INTO cluster_status (cluster_id, export_id, state, ghsa_id, cve_id, "
+                "content, updated_at, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (c["id"], exp["id"], st.state, st.ghsa_id, st.cve_id, json.dumps(content),
+                 st.updated_at, now()))
+            refs = ", ".join(x for x in (st.ghsa_id, st.cve_id) if x)
+            for m in _member_rows(conn, c["id"]):
+                if st.state == "duplicate" and m["status"] == "exported":
+                    # Stays in its cluster: the cluster is what was exported and matched.
+                    conn.execute("UPDATE findings SET status = 'duplicate', duplicate_of = ?, "
+                                 "updated_at = ? WHERE id = ?",
+                                 (st.dedup.advisory, now(), m["id"]))
+                    _event(conn, m["id"], None, "exported", "duplicate",
+                           f"zepsec: duplicate of {st.dedup.advisory}")
+                elif st.state in ("fix-merged", "published") and st.fix_shas \
+                        and m["status"] == "exported":
+                    conn.execute("UPDATE findings SET status = 'fixed', updated_at = ? "
+                                 "WHERE id = ?", (now(), m["id"]))
+                    _event(conn, m["id"], None, "exported", "fixed",
+                           f"zepsec: fixed by {', '.join(s[:12] for s in st.fix_shas)}"
+                           + (f" ({refs})" if refs else ""))
+                else:
+                    _event(conn, m["id"], None, m["status"], m["status"],
+                           f"zepsec: {st.state}" + (f" ({refs})" if refs else ""))
     return out

@@ -19,7 +19,7 @@ from . import carry as carry_mod
 from . import launch, ledger, repo, triage, writeup
 from .config import MAIN_LEDGER, Config, ConfigError, Project, load_config
 from .db import connect
-from .schemas import SCHEMAS
+from .schemas import CONTRACT_FILES, SCHEMAS, contract_schema
 from .units import extract_tree
 
 console = Console()
@@ -950,6 +950,29 @@ def bench_judge(c: Ctx, project: str, name: str, item: str, slugs: tuple[str, ..
     click.echo(f"{name} {item}: {what}")
 
 
+@main.command("sync-status")
+@click.argument("project")
+@click.option("--json", "as_json", is_flag=True)
+@pass_ctx
+def sync_status_cmd(c: Ctx, project: str, as_json: bool) -> None:
+    """Read zepsec's status.json beside each export and record what changed.
+
+    A duplicate (of an existing advisory) moves the members to `duplicate`; a
+    merged fix (fix-merged / published, with fix SHAs) moves them to `fixed`;
+    other states are noted in the members' history."""
+    c.project(project)
+    rows = writeup.sync_status(c.conn, c.cfg, project)
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        click.echo("no status.json files yet")
+    for r in rows:
+        click.echo(f"{r['cluster']}: {r['action']}")
+        for prob in r["problems"]:
+            click.echo(f"  ! {prob}")
+
+
 # --- write-up and export ----------------------------------------------------
 
 
@@ -1018,10 +1041,12 @@ def writeups(c: Ctx, project: str, as_json: bool) -> None:
         _emit_json(rows)
         return
     console.print(_titled_table(
-        ("#", "cluster", "score", "atk", "track", "n", "state", "version", "exported"),
+        ("#", "cluster", "score", "atk", "track", "n", "state", "version", "exported",
+         "zepsec"),
         [(str(i), r["cluster"], "" if r["score"] is None else f"{r['score']:.1f}",
           r["attacker"] or "", r["track"], str(r["members"]), r["state"],
-          str(r["version"] or ""), str(r["exported_version"] or ""), r["title"])
+          str(r["version"] or ""), str(r["exported_version"] or ""),
+          " ".join(x for x in (r["zepsec"], r["ghsa_id"]) if x), r["title"])
          for i, r in enumerate(rows, 1)]))
     counts = defaultdict(int)
     for r in rows:
@@ -1050,7 +1075,23 @@ def export_cmd(c: Ctx, project: str, clusters: tuple[str, ...]) -> None:
 
 
 @main.command()
-@click.argument("kind", type=click.Choice(sorted(SCHEMAS)))
-def schema(kind: str) -> None:
-    """Print the JSON schema a run (or write-up) result must satisfy."""
-    _emit_json(SCHEMAS[kind].model_json_schema())
+@click.argument("kind", type=click.Choice(sorted(SCHEMAS)), required=False)
+@click.option("--write", is_flag=True,
+              help="Regenerate the committed hand-off contracts under schemas/.")
+@pass_ctx
+def schema(c: Ctx, kind: str | None, write: bool) -> None:
+    """Print the JSON schema of a run result, write-up, export or zepsec status.
+
+    `export` (cluster.json) and `status` (zepsec's status.json) are the contract
+    with zepsec; `--write` regenerates their committed copies in schemas/."""
+    if write:
+        out = c.cfg.root / "schemas"
+        out.mkdir(exist_ok=True)
+        for k, name in CONTRACT_FILES.items():
+            (out / name).write_text(json.dumps(contract_schema(k), indent=2) + "\n")
+            click.echo(f"wrote schemas/{name}")
+        return
+    if kind is None:
+        raise click.UsageError("name a KIND, or pass --write")
+    _emit_json(contract_schema(kind) if kind in CONTRACT_FILES
+               else SCHEMAS[kind].model_json_schema())

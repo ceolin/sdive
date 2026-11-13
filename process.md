@@ -42,7 +42,7 @@ sdive findings <p>
 
 # 6. zepsec, client side (zepsec's skills): dedup, GHSA draft, fix, CVE
 
-# 7. Status back (to build)
+# 7. Status back
 sdive sync-status <p>
 ```
 
@@ -81,7 +81,7 @@ flowchart TD
         fix --> pub["Publish · CVE"]
     end
 
-    zepsec -->|status.json| back["sdive reads status<br/>exported → filed → fixed"]
+    zepsec -->|status.json| back["sdive sync-status<br/>exported → fixed / duplicate"]
 ```
 
 ---
@@ -169,7 +169,8 @@ the skills: they record the run if a result file exists, and abandon it
 otherwise.
 
 Finding lifecycle: `hypothesis → verified | rejected | duplicate → exported →
-fixed`. Rejections and duplicates keep their reasoning.
+fixed`, or `exported → duplicate` when zepsec finds an existing advisory
+already covers it. Rejections and duplicates keep their reasoning.
 
 ## 4. Triage
 
@@ -306,9 +307,11 @@ version of an exported cluster makes it `approved` again, ready to re-export.
 
 ## 6. zepsec, client side
 
-zepsec's work, not sdive's. A local intake channel on the zepsec client reads
-the export directory. It dedups against MCUboot advisories and the disclosure
-corpus, then runs the pre-fix flow:
+zepsec's work, not sdive's; its brief is `../zepsec/sdive-intake.md`. A local
+intake channel on the zepsec client copies each export into a local-only unit
+(nothing derived from an export goes to zepsec's prod Instance). It dedups
+against the project's advisories and related corpora, then runs the pre-fix
+flow:
 
 - **`advisory` clusters:** embargoed GHSA draft → `/mcuboot-fix` (a plain-bug
   PR from the user's fork) → merge → publish → CVE (Zephyr is MCUboot's CNA).
@@ -319,13 +322,41 @@ sdive's blind verification is trusted: zepsec does not re-validate.
 Fix commits and PRs use plain bug-fix wording: nothing from `analysis/`, no
 security framing while the advisory is embargoed.
 
-## 7. Status back (to build)
+## 7. Status back
 
-zepsec writes `status.json` next to each export (dedup verdict, GHSA id, fix
-PR, fix SHA). sdive reads it (`sdive sync-status <p>`, to build) to move the
-findings along: `exported` → known (a duplicate of an existing advisory) or
-filed → `fixed`. The ledger stays the single place that tracks every
-finding's state.
+zepsec writes `status.json` beside each export it acts on, and rewrites it at
+each step. `sdive sync-status <p>` reads them all and records each change
+(table `cluster_status`), so the ledger stays the single place that tracks
+every finding's state:
+
+- **`duplicate`** (an existing advisory already covers the cluster): the
+  members move `exported → duplicate`, with the GHSA id as `duplicate_of`.
+  They stay in their cluster.
+- **`fix-merged`**, or **`published`** with fix SHAs: the members move
+  `exported → fixed`.
+- **`received`, `drafted`, `fix-open`, `declined`**: noted in the members'
+  history (with the GHSA and CVE ids); no status change.
+
+A status names the export it refers to by `export_hash` (the first 32 hex
+characters of the SHA-256 of `cluster.json`) and `writeup_version`. One that
+matches no export sdive wrote is refused; one that refers to an older export
+than the latest is recorded and flagged, since zepsec has not picked up the
+re-export yet. Unchanged files are skipped. `sdive writeups <p>` shows each
+cluster's zepsec state and GHSA id.
+
+**The contract.** Both hand-off documents are JSON Schemas committed in
+`schemas/`: `sdive-export-1.schema.json` (`cluster.json`) and
+`zepsec-status-1.schema.json` (`status.json`, with the cross-field rules in
+its description). `sdive export` validates every export against its schema
+before writing it, and `sdive sync-status` validates every status. Changing
+either means bumping the schema string, regenerating with
+`sdive schema --write`, and telling zepsec; a test fails while the committed
+files are stale.
+
+| Command | Does |
+|---|---|
+| `sdive sync-status <p> [--json]` | Reads every `status.json` under `analysis/exports/<p>/`, records changes, moves findings to `fixed` / `duplicate`. |
+| `sdive schema export\|status` | Prints a hand-off schema; `sdive schema --write` regenerates `schemas/`. |
 
 ## Change findings (Phase 3, to build)
 

@@ -201,6 +201,21 @@ MIGRATIONS: list[str] = [
         exported_at   TEXT NOT NULL
     );
     """,
+    # v6: status back from zepsec. Each change of an export's status.json, as
+    # read by `sdive sync-status`: the zepsec-side state of a cluster.
+    """
+    CREATE TABLE cluster_status (
+        id          INTEGER PRIMARY KEY,
+        cluster_id  INTEGER NOT NULL REFERENCES clusters(id),
+        export_id   INTEGER NOT NULL REFERENCES exports(id),
+        state       TEXT NOT NULL,
+        ghsa_id     TEXT,
+        cve_id      TEXT,
+        content     TEXT NOT NULL,   -- status.json as read (JSON)
+        updated_at  TEXT NOT NULL,   -- zepsec's timestamp
+        synced_at   TEXT NOT NULL
+    );
+    """,
 ]
 
 

@@ -151,3 +151,78 @@ def test_status_priority(scoped):  # noqa: F811
     rows = writeup.status(conn, "demo")
     assert [r["cluster"] for r in rows] == ["c-high", "c-tie1", "c-tie3", "c-low"]
     assert (rows[0]["score"], rows[0]["attacker"]) == (7.8, "A2")
+
+
+def test_contract_files_current(cfg):
+    from security_dive.schemas import CONTRACT_FILES, contract_schema
+    root = writeup.Path(__file__).resolve().parents[1] / "schemas"
+    for kind, name in CONTRACT_FILES.items():
+        committed = json.loads((root / name).read_text())
+        assert committed == contract_schema(kind), f"run `sdive schema --write` ({name})"
+
+
+def exported(cfg, conn, snap, mirror, slug, finding):
+    add_finding(conn, snap, finding, [("src/parser.c", 3, 6)])
+    rel = triage.Releases(mirror)
+    for i in triage.scope_targets(conn, "demo", [], redo=False):
+        triage.scope_finding(conn, mirror, rel, i)
+    triage.new_cluster(conn, "demo", slug, slug.upper(), None, [finding])
+    triage.set_track(conn, slug, "advisory", "released")
+    p = writeup.result_path(cfg, slug)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(result(cluster=slug)))
+    writeup.record(conn, cfg, slug)
+    writeup.approve(conn, slug, None, None)
+    return writeup.export(conn, cfg, slug)
+
+
+def test_sync_status(cfg, scoped):  # noqa: F811
+    conn, snap, mirror = scoped
+    out = exported(cfg, conn, snap, mirror, "aa", "fa")
+    out2 = exported(cfg, conn, snap, mirror, "bb", "fb")
+    h = ledger.file_hash(out / "cluster.json")
+    status = lambda d, **kw: d.joinpath("status.json").write_text(json.dumps({  # noqa: E731
+        "schema": "zepsec-status/1", "project": "demo", "cluster": d.name,
+        "export_hash": ledger.file_hash(d / "cluster.json"), "writeup_version": 1,
+        "state": "received", "updated_at": "2026-11-13T00:00:00Z", **kw}))
+    sync = lambda: {r["cluster"]: r for r in writeup.sync_status(conn, cfg, "demo")}  # noqa: E731
+    fstatus = lambda s: conn.execute(  # noqa: E731
+        "SELECT status, duplicate_of FROM findings WHERE slug = ?", (s,)).fetchone()
+
+    status(out, export_hash="0" * 32)
+    assert sync()["aa"]["action"] == "refused"
+    status(out, state="drafted")   # no ghsa_id
+    assert "ghsa_id" in sync()["aa"]["problems"][0]
+    status(out, cluster="bb")
+    assert sync()["aa"]["action"] == "refused"
+
+    status(out, state="drafted", ghsa_id="GHSA-abcd-efgh-ijkl", unit="sdive-aa")
+    assert sync()["aa"]["action"] == "drafted"
+    assert sync()["aa"]["action"] == "unchanged"
+    assert writeup.status(conn, "demo")[0]["zepsec"] == "drafted"
+    note = conn.execute("SELECT note FROM finding_events ORDER BY id DESC").fetchone()[0]
+    assert note == "zepsec: drafted (GHSA-abcd-efgh-ijkl)" and fstatus("fa")[0] == "exported"
+
+    # A new version re-exported: a status still naming the first export is old.
+    stage_slug = writeup.result_path(cfg, "aa")
+    stage_slug.write_text(json.dumps(result(cluster="aa", advisory_summary="Revised")))
+    writeup.record(conn, cfg, "aa")
+    writeup.approve(conn, "aa", None, None)
+    writeup.export(conn, cfg, "aa")
+    status(out, export_hash=h, state="fix-open", ghsa_id="GHSA-abcd-efgh-ijkl",
+           fix_prs=["https://example.invalid/pull/1"])
+    r = sync()["aa"]
+    assert r["action"] == "fix-open" and "older export" in r["problems"][0]
+
+    status(out, state="fix-merged", ghsa_id="GHSA-abcd-efgh-ijkl", writeup_version=2,
+           fix_prs=["https://example.invalid/pull/1"], fix_shas=["a" * 40])
+    r = sync()["aa"]
+    assert (r["action"], r["problems"]) == ("fix-merged", [])
+    assert fstatus("fa")[0] == "fixed"
+
+    status(out2, state="duplicate", dedup={"match": "duplicate",
+                                           "advisory": "GHSA-wxyz-wxyz-wxyz"})
+    assert sync()["bb"]["action"] == "duplicate"
+    assert tuple(fstatus("fb")) == ("duplicate", "GHSA-wxyz-wxyz-wxyz")
+    assert conn.execute("SELECT cluster_id FROM findings WHERE slug = 'fb'").fetchone()[0]
+

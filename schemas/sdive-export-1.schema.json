@@ -1,0 +1,749 @@
+{
+  "$defs": {
+    "ExportMember": {
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property"
+        },
+        "attacker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Attacker"
+        },
+        "cwe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cwe"
+        },
+        "cvss_vector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verifier's vector (provenance)",
+          "title": "Cvss Vector"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confidence"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/Location"
+          },
+          "title": "Locations",
+          "type": "array"
+        },
+        "carried_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "'<ledger>:<slug>' when carried in from a benchmark round",
+          "title": "Carried From"
+        },
+        "verification": {
+          "items": {
+            "$ref": "#/$defs/ExportVerification"
+          },
+          "title": "Verification",
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/$defs/ExportMemberScope"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "claim",
+        "property",
+        "attacker",
+        "cwe",
+        "cvss_vector",
+        "confidence",
+        "locations",
+        "carried_from",
+        "verification",
+        "scope"
+      ],
+      "title": "ExportMember",
+      "type": "object"
+    },
+    "ExportMemberScope": {
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "anyOf": [
+            {
+              "enum": [
+                "released",
+                "post-release",
+                "mixed",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verdict"
+        },
+        "latest_release": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Release"
+        },
+        "as_is_since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Is Since"
+        }
+      },
+      "title": "ExportMemberScope",
+      "type": "object"
+    },
+    "ExportProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "ledger": {
+          "title": "Ledger",
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/ExportSnapshot"
+        },
+        "writeup_version": {
+          "minimum": 1,
+          "title": "Writeup Version",
+          "type": "integer"
+        },
+        "written_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The writer's model (not credited)",
+          "title": "Written By"
+        },
+        "written_at": {
+          "title": "Written At",
+          "type": "string"
+        },
+        "approved_at": {
+          "title": "Approved At",
+          "type": "string"
+        },
+        "approval_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approval Note"
+        },
+        "origin_runs": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Origin Runs",
+          "type": "array"
+        },
+        "analysis_models": {
+          "description": "Models that found and verified the members: the ones to credit",
+          "items": {
+            "type": "string"
+          },
+          "title": "Analysis Models",
+          "type": "array"
+        },
+        "sdive_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sdive Commit"
+        },
+        "exported_at": {
+          "title": "Exported At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ledger",
+        "snapshot",
+        "writeup_version",
+        "written_by",
+        "written_at",
+        "approved_at",
+        "approval_note",
+        "origin_runs",
+        "analysis_models",
+        "sdive_commit",
+        "exported_at"
+      ],
+      "title": "ExportProvenance",
+      "type": "object"
+    },
+    "ExportSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Sha",
+          "type": "string"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ref"
+        }
+      },
+      "required": [
+        "sha",
+        "ref"
+      ],
+      "title": "ExportSnapshot",
+      "type": "object"
+    },
+    "ExportVerification": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "integer"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "run_id",
+        "model",
+        "verdict"
+      ],
+      "title": "ExportVerification",
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Repo-relative path in the snapshot",
+          "title": "Path",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Enclosing function, if any",
+          "title": "Symbol"
+        }
+      },
+      "required": [
+        "path",
+        "start_line"
+      ],
+      "title": "Location",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "`cluster.json`: an approved write-up exported for zepsec.",
+  "properties": {
+    "is_vulnerability": {
+      "enum": [
+        "yes",
+        "no",
+        "unclear"
+      ],
+      "title": "Is Vulnerability",
+      "type": "string"
+    },
+    "property_violated": {
+      "anyOf": [
+        {
+          "enum": [
+            "P1",
+            "P2",
+            "P3",
+            "P4",
+            "P5",
+            "P6"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Property Violated"
+    },
+    "attacker_class": {
+      "anyOf": [
+        {
+          "enum": [
+            "A1",
+            "A2",
+            "A3"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Attacker Class"
+    },
+    "vuln_class": {
+      "anyOf": [
+        {
+          "enum": [
+            "memory-safety",
+            "bounds",
+            "integer-overflow",
+            "use-after-free",
+            "info-leak",
+            "auth",
+            "crypto",
+            "dos",
+            "race",
+            "logic",
+            "input-validation",
+            "other"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Vuln Class"
+    },
+    "cwe": {
+      "anyOf": [
+        {
+          "pattern": "^CWE-\\d+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cwe"
+    },
+    "severity": {
+      "enum": [
+        "none",
+        "low",
+        "moderate",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "cvss_vector": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "CVSS 3.1 base vector; sdive scores it",
+      "title": "Cvss Vector"
+    },
+    "attacker_reachable": {
+      "enum": [
+        "yes",
+        "maybe",
+        "no",
+        "unknown"
+      ],
+      "title": "Attacker Reachable",
+      "type": "string"
+    },
+    "reachable_surface": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Reachable Surface",
+      "type": "array"
+    },
+    "affected_components": {
+      "description": "Repo-relative paths in the snapshot",
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Components",
+      "type": "array"
+    },
+    "affected_functions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Functions",
+      "type": "array"
+    },
+    "introduced_by": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Introduced By"
+    },
+    "affected_versions": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Affected Versions"
+    },
+    "reportable": {
+      "title": "Reportable",
+      "type": "boolean"
+    },
+    "reportable_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reportable Reason"
+    },
+    "advisory_summary": {
+      "anyOf": [
+        {
+          "maxLength": 150,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Advisory Summary"
+    },
+    "advisory_description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Advisory Description"
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "affected_configurations": {
+      "default": [],
+      "description": "Build options (MCUBOOT_*/CONFIG_*) and ports it needs",
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Configurations",
+      "type": "array"
+    },
+    "recommended_fix": {
+      "description": "The one fix that closes every member",
+      "title": "Recommended Fix",
+      "type": "string"
+    },
+    "open_questions": {
+      "default": [],
+      "description": "What the write-up could not settle from source",
+      "items": {
+        "type": "string"
+      },
+      "title": "Open Questions",
+      "type": "array"
+    },
+    "schema": {
+      "const": "sdive-export/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "source": {
+      "const": "security-dive",
+      "title": "Source",
+      "type": "string"
+    },
+    "project": {
+      "description": "sdive project name; selects zepsec's filing profile",
+      "title": "Project",
+      "type": "string"
+    },
+    "cluster": {
+      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+      "title": "Cluster",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "track": {
+      "enum": [
+        "advisory",
+        "plain-fix"
+      ],
+      "title": "Track",
+      "type": "string"
+    },
+    "track_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Track Note"
+    },
+    "sha": {
+      "description": "Commit analysed: not a fix SHA",
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Sha",
+      "type": "string"
+    },
+    "cvss_score": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cvss Score"
+    },
+    "members": {
+      "items": {
+        "$ref": "#/$defs/ExportMember"
+      },
+      "minItems": 1,
+      "title": "Members",
+      "type": "array"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "enum": [
+            "released",
+            "post-release",
+            "mixed",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Scope"
+    },
+    "provenance": {
+      "$ref": "#/$defs/ExportProvenance"
+    }
+  },
+  "required": [
+    "is_vulnerability",
+    "property_violated",
+    "attacker_class",
+    "vuln_class",
+    "cwe",
+    "severity",
+    "cvss_vector",
+    "attacker_reachable",
+    "affected_components",
+    "introduced_by",
+    "affected_versions",
+    "reportable",
+    "reportable_reason",
+    "advisory_summary",
+    "advisory_description",
+    "confidence",
+    "evidence",
+    "rationale",
+    "recommended_fix",
+    "schema",
+    "source",
+    "project",
+    "cluster",
+    "title",
+    "track",
+    "track_note",
+    "sha",
+    "cvss_score",
+    "members",
+    "scope",
+    "provenance"
+  ],
+  "title": "ExportDocument",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sdive-export-1.schema.json"
+}

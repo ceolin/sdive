@@ -75,9 +75,14 @@ instructions.
 - Tests: `uv run pytest`. Lint: `uvx ruff check src tests`.
 - Module map: `config.py` (config + project scope/areas), `repo.py` (mirror,
   snapshots), `units.py` (tree-sitter extraction), `db.py` (schema, append-only
-  migrations), `schemas.py` (agent result models), `ledger.py` (queue, record, briefs,
-  reports), `bench.py` (ground truth, scoring), `carry.py` (findings across
-  ledgers), `triage.py` (clusters, release scoping, triage status),
-  `writeup.py` (write-up validation, CVSS scoring, export), `blind.py` (agent
-  blindness hook), `launch.py` (`sdive run`), `cli.py`. Agents and skills:
-  `.claude/agents/`, `.claude/skills/`; lenses: `projects/<p>/lenses/`.
+  migrations), `schemas.py` (agent result models, hand-off contracts),
+  `ledger.py` (queue, record, briefs, reports), `bench.py` (ground truth,
+  scoring), `carry.py` (findings across ledgers), `triage.py` (clusters,
+  release scoping, triage status), `writeup.py` (write-up validation, CVSS
+  scoring, export, status sync), `blind.py` (agent blindness hook),
+  `launch.py` (`sdive run`), `cli.py`. Agents and skills: `.claude/agents/`,
+  `.claude/skills/`; lenses: `projects/<p>/lenses/`.
+- `schemas/` holds the hand-off contracts with zepsec (`cluster.json`,
+  `status.json`); regenerate with `uv run sdive schema --write` whenever the
+  export or status models change, and bump the schema string if the change
+  is not backward compatible.
