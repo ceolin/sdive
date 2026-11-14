@@ -37,6 +37,8 @@ exclude = [
     "include/zephyr/arch/posix/**",
 ]
 default_area = { name = "misc", priority = 1, description = "In scope, not claimed by any MAINTAINERS.yml area." }
+# Record what enables each file (CMakeLists *_ifdef(CONFIG_...) chain) for briefs.
+kconfig_map = true
 
 [areas_source]
 file = "areas.toml"

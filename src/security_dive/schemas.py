@@ -111,12 +111,17 @@ class VerifyResult(_Strict):
 
 class Verdict(_Strict):
     """An advisory verdict for one cluster. The fields up to `rationale` are
-    zepsec's MCUboot verdict (`result.json`) fields, so zepsec's filing tools
-    read an export directly; the rest are sdive's additions."""
+    zepsec's verdict (`result.json`) fields (`mcuboot-deep-analyst`; for
+    Zephyr `zepsec-deep-analyst` plus the property and attacker class its
+    threat model defines), so zepsec's filing tools read an export directly;
+    the rest are sdive's additions. Property and attacker values are checked
+    against the project's threat model when a write-up is recorded."""
 
     is_vulnerability: Literal["yes", "no", "unclear"]
-    property_violated: Literal["P1", "P2", "P3", "P4", "P5", "P6"] | None
-    attacker_class: Literal["A1", "A2", "A3"] | None
+    property_violated: str | None = Field(pattern=r"^P[1-9]$",
+                                          description="Threat-model property, e.g. P1")
+    attacker_class: str | None = Field(pattern=r"^A[1-9]$",
+                                       description="Threat-model attacker class, e.g. A2")
     vuln_class: Literal["memory-safety", "bounds", "integer-overflow", "use-after-free",
                         "info-leak", "auth", "crypto", "dos", "race", "logic",
                         "input-validation", "other"] | None
@@ -138,7 +143,8 @@ class Verdict(_Strict):
     rationale: str
     # sdive additions
     affected_configurations: list[str] = Field(
-        default=[], description="Build options (MCUBOOT_*/CONFIG_*) and ports it needs")
+        default=[], description="Build options (MCUBOOT_*/CONFIG_*), ports, boards or "
+        "devicetree compatibles it needs")
     recommended_fix: str = Field(description="The one fix that closes every member")
     open_questions: list[str] = Field(
         default=[], description="What the write-up could not settle from source")

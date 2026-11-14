@@ -148,6 +148,20 @@ def latest(conn: sqlite3.Connection, cluster_id: int) -> sqlite3.Row | None:
                         (cluster_id,)).fetchone()
 
 
+def threat_model_labels(path: Path | None) -> tuple[set[str], set[str]]:
+    """The property (P*) and attacker-class (A*) labels a threat model defines,
+    from its `- **P1 Name**` / `- **A1 Name**` list items."""
+    if path is None or not path.is_file():
+        return set(), set()
+    found = re.findall(r"^- \*\*([PA][1-9])\b", path.read_text(), re.M)
+    return {x for x in found if x[0] == "P"}, {x for x in found if x[0] == "A"}
+
+
+def guidance_path(project) -> Path:
+    """Per-project guidance for the writer (attack vectors, surfaces, configs)."""
+    return project.defdir / "writer.md"
+
+
 def brief(conn: sqlite3.Connection, cfg: Config, slug: str,
           feedback: str | None = None) -> dict:
     """Everything the writer needs for one cluster, written to staging."""
@@ -162,6 +176,8 @@ def brief(conn: sqlite3.Connection, cfg: Config, slug: str,
         "cluster": {k: c[k] for k in ("slug", "title", "rationale", "track", "track_note")},
         "snapshot": {"sha": snap["sha"], "ref": snap["ref"], "path": str(tree)},
         "threat_model": str(project.threat_model) if project.threat_model else None,
+        "writer_guidance": (str(guidance_path(project)) if guidance_path(project).is_file()
+                            else None),
         "members": [],
         "brief_path": str(brief_path(cfg, slug)),
         "result_path": str(result_path(cfg, slug)),
@@ -216,6 +232,13 @@ def validate(conn: sqlite3.Connection, cfg: Config, slug: str, data: dict) -> di
     except ValidationError as e:
         raise LedgerError(f"result does not match the WriteupResult schema:\n{e}") from None
     problems = []
+    props, attackers = threat_model_labels(cfg.project(c["project"]).threat_model)
+    if props and w.property_violated and w.property_violated not in props:
+        problems.append(f"property {w.property_violated} is not defined by the threat model "
+                        f"({', '.join(sorted(props))})")
+    if attackers and w.attacker_class and w.attacker_class not in attackers:
+        problems.append(f"attacker class {w.attacker_class} is not defined by the threat model "
+                        f"({', '.join(sorted(attackers))})")
     if w.cluster != slug:
         problems.append(f"result is for cluster {w.cluster!r}, not {slug!r}")
     if c["track"] == "advisory" and not w.reportable:

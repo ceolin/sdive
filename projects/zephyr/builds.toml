@@ -1,0 +1,87 @@
+# What `sdive build zephyr` configures (CMake only, never compiled): the union
+# of these builds tells which sources some legitimate configuration compiles.
+# They need not be realistic products. `app` is relative to the Zephyr tree;
+# `conf` and `overlays` are files in projects/zephyr/builds/; `args` are extra
+# CMake -D arguments (relative conf files there resolve against the app dir).
+#
+# Tier 1, generic code: wide builds on one or two boards.
+
+[[build]]
+name = "wide-net-k64f"
+board = "frdm_k64f"            # Ethernet, MPU
+app = "tests/net/all"
+
+[[build]]
+name = "wide-net-userspace-x86"
+board = "qemu_x86"
+app = "tests/net/all"
+args = ["-DCONFIG_USERSPACE=y"]
+
+[[build]]
+name = "wide-bt-audio-nrf52840"
+board = "nrf52840dk/nrf52840"  # host + Zephyr's own controller
+app = "tests/bluetooth/shell"
+args = ["-DEXTRA_CONF_FILE=extra-audio.conf"]
+
+[[build]]
+name = "wide-bt-mesh-nrf52840"
+board = "nrf52840dk/nrf52840"
+app = "tests/bluetooth/shell"
+args = ["-DEXTRA_CONF_FILE=mesh.conf", "-DCONFIG_SECURE_STORAGE=y"]
+
+[[build]]
+name = "wide-usb-device-host"
+board = "frdm_k64f"
+app = "samples/subsys/usb/shell"
+args = ["-DCONF_FILE=prj_device_and_host.conf"]
+
+[[build]]
+name = "wide-mcumgr-udp"
+board = "frdm_k64f"
+app = "samples/subsys/mgmt/mcumgr/smp_svr"
+args = ["-DEXTRA_CONF_FILE=udp.conf;fs.conf;shell-mgmt.conf"]
+
+[[build]]
+name = "wide-mcumgr-bt"
+board = "nrf52840dk/nrf52840"
+app = "samples/subsys/mgmt/mcumgr/smp_svr"
+args = ["-DEXTRA_CONF_FILE=bt.conf"]
+
+[[build]]
+name = "wide-userspace-m3"
+board = "qemu_cortex_m3"       # MPU user mode
+app = "tests/kernel/mem_protect/userspace"
+
+# Tier 2, drivers: Zephyr's build_all suites compile drivers against fake
+# devicetree nodes. Tier 3, arch/SoC and the rest: Zephyr's own test and
+# sample scenarios, each on its first usable platform.
+
+[[suite]]
+path = "tests/drivers/build_all"
+
+[[suite]]
+path = "tests/net"
+
+[[suite]]
+path = "tests/bluetooth"
+
+[[suite]]
+path = "tests/subsys"
+
+[[suite]]
+path = "tests/kernel"
+
+[[suite]]
+path = "tests/arch"
+
+[[suite]]
+path = "tests/lib"
+
+[[suite]]
+path = "samples/net"
+
+[[suite]]
+path = "samples/bluetooth"
+
+[[suite]]
+path = "samples/subsys"

@@ -18,6 +18,8 @@ sdive mirror <p>
 sdive units <p> [REV]
 sdive areas <p> [--generate REV]
     (large projects: order the queue before deep work)
+sdive build <p> [--only GLOB]
+sdive builds <p>
 /sdive-rank <p> [N|all] --min-priority 4
 sdive rank show <p>
 
@@ -115,6 +117,14 @@ before any generated area (e.g. shell commands, syscall handlers); with
 `split = "<area>"` they subdivide a large generated area where it is the
 winner, inheriting its priority unless they set one.
 
+**What enables a file.** With `kconfig_map = true` in `[scope]` (Zephyr),
+`sdive units` also records each source file's Kconfig conditions, read
+statically from the `CMakeLists.txt` chain (`*_sources_ifdef(CONFIG_…)`,
+`add_subdirectory_ifdef`, `if()` blocks). Briefs carry them as `enabled_by`
+so auditors, verifiers and the writer can state the configuration a finding
+needs (an approximation: Kconfig dependencies and defaults are not
+followed).
+
 **Reference trees** are either submodules (`path`, MCUboot) or west
 projects (`west = "<name>"`, Zephyr), exported to `_west/<name>` at the
 revision the snapshot's `west.yml` pins.
@@ -132,12 +142,14 @@ verification, checks that exist only as `__ASSERT`, reference counting,
 handler-like names), computed at indexing; plus the **reach** the cheap
 `sdive-ranker` agent judged (0 not attacker-reachable … 3 parses attacker
 input directly: −2, −0.5, +0.5, +1.5); minus 1.5 for code no recorded build
-compiles, once builds are recorded (`sdive build`, to build). A dive takes
+compiles, once builds are recorded (`sdive build`; `.c` files only). A dive takes
 the top-scored function's file; a sweep takes areas in order of their best
 unit.
 
 | Command | What it does |
 |---|---|
+| `sdive build <p> [REV] [--only GLOB] [-j N] [--redo] [--list]` | Configures (CMake only, never compiles) the builds in `projects/<p>/builds.toml` at the snapshot and records which sources each compiles, from `compile_commands.json` (~8 s a build). Hand-written wide builds (`[[build]]`) plus suites (`[[suite]]`: every `testcase.yaml`/`sample.yaml`/`tests.yaml` scenario under a directory, on its first usable platform; native/bsim hosts skipped). Runs in a west workspace under `work/west/<p>/` (the project checked out from the mirror, modules at its `west.yml`, cloned with the user's workspace as `--path-cache` only); the Python env and SDK come from `[projects.<p>.build]` in `config.toml`, used read-only. Already recorded builds are skipped unless `--redo`. |
+| `sdive builds <p> [--failed]` | Builds ok/failed and in-scope `.c` files no build compiles, per priority; `--failed` shows the end of each failed log. |
 | `/sdive-rank <p> [N\|all] [--parallel P] [--min-priority K]` | Hands batches of whole files (best-scored first, functions with no judgement yet) to `sdive-ranker` (a Sonnet subagent, blind like the others), records its judgements and rescores. Default `--min-priority 4`: rank where the deep work will go. |
 | `sdive rank show <p> [--top N] [--files] [--area A]` | The queue order: units (or files) by score, with reach and signals. |
 | `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. |
@@ -299,8 +311,12 @@ a batch. `sdive writeups <p>` shows where every tracked cluster stands.
    `sdive-writer` subagent, which is blind like the analysis agents. The brief
    holds the cluster (its rationale is the one fix; its track note is the
    release evidence) and, per member, the claim, auditor notes, locations,
-   the verifier's reasoning, and the release-scoping blame. The writer re-reads
-   the code and writes zepsec's MCUboot verdict fields:
+   the verifier's reasoning, and the release-scoping blame, plus the
+   project's writer guidance (`projects/<p>/writer.md`: attack-vector
+   mapping, `reachable_surface` vocabulary, how to name configurations and
+   versions) and `enabled_by` where recorded. The writer re-reads the code
+   and writes zepsec's verdict fields (`mcuboot-deep-analyst`; for Zephyr
+   `zepsec-deep-analyst`, which lacks only the property and attacker class):
    - `is_vulnerability`, `property_violated`, `attacker_class`, `vuln_class`,
      `cwe`
    - `severity`, `cvss_vector`
@@ -314,7 +330,8 @@ a batch. `sdive writeups <p>` shows where every tracked cluster stands.
    (which briefs the fix author) and `open_questions`.
 2. **Record.** `sdive writeup record <cluster>` validates the draft and
    stores it as a new version. sdive scores the CVSS 3.1 vector itself, and
-   `severity` must be its GitHub band. `reportable` must match the track
+   `severity` must be its GitHub band. The property and attacker class must
+   be ones the project's threat model defines. `reportable` must match the track
    (`advisory` → true, `plain-fix` → false with a post-release-only reason).
    Every cited component must exist in the snapshot, and no absolute or local
    path may appear in the text, since the text is published. A rejected draft

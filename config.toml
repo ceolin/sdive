@@ -18,3 +18,12 @@ upstream = "https://github.com/zephyrproject-rtos/zephyr.git"
 reference_repo = "/Users/davidb/zephyrproject/zephyr"
 default_branch = "main"
 threat_model = "projects/zephyr/threat-model.md"  # draft; Open rulings pending the Zephyr security team
+
+# Machine-specific: what `sdive build zephyr` configures with. The Python env
+# and the module cache are the user's and are only read (PYTHONDONTWRITEBYTECODE,
+# west --path-cache clones from them).
+[projects.zephyr.build]
+python_bin = "~/zephyrproject/.venv/bin"
+sdk = "~/.local/opt/zephyr-sdk-1.0.0"
+module_cache = "~/zephyrproject"
+default_board = "qemu_cortex_m3"

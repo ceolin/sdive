@@ -226,3 +226,24 @@ def test_sync_status(cfg, scoped):  # noqa: F811
     assert tuple(fstatus("fb")) == ("duplicate", "GHSA-wxyz-wxyz-wxyz")
     assert conn.execute("SELECT cluster_id FROM findings WHERE slug = 'fb'").fetchone()[0]
 
+
+
+def test_labels_checked_against_threat_model(cfg, scoped):  # noqa: F811
+    conn, snap, _mirror = scoped
+    add_finding(conn, snap, "a", [("src/parser.c", 3, 6)])
+    triage.new_cluster(conn, "demo", "parse-len", "Parser length", "one check", ["a"])
+    triage.set_track(conn, "parse-len", "advisory", "released")
+    cfg.project("demo").threat_model.write_text(
+        "# tm\n\n- **P1 Integrity** — x\n- **P6 Availability** — y\n"
+        "- **A1 Remote** — z\n- **A2 Adjacent** — w\n")
+    assert writeup.threat_model_labels(cfg.project("demo").threat_model) == (
+        {"P1", "P6"}, {"A1", "A2"})
+    for bad, msg in [(result(attacker_class="A4"), "attacker class A4 is not defined"),
+                     (result(property_violated="P3"), "property P3 is not defined")]:
+        stage(cfg, bad)
+        with pytest.raises(ledger.LedgerError, match=msg):
+            writeup.record(conn, cfg, "parse-len")
+    stage(cfg, result())
+    writeup.record(conn, cfg, "parse-len")
+    (cfg.project("demo").defdir / "writer.md").write_text("# guidance\n")
+    assert writeup.brief(conn, cfg, "parse-len")["writer_guidance"].endswith("writer.md")

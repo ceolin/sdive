@@ -150,6 +150,7 @@ class Project:
     # hand-written `areas`, the most specific claim winning.
     generated_areas: tuple[Area, ...] = ()
     areas_source: Path | None = None
+    kconfig_map: bool = False           # derive file -> Kconfig conditions (Zephyr)
     _area_cache: dict = dataclasses.field(default_factory=dict, compare=False, hash=False,
                                           repr=False)
 
@@ -235,6 +236,8 @@ class Config:
     # one (at the top of analysis/); others (e.g. benchmark rounds) live under
     # analysis/ledgers/<name>/ and can be thrown away.
     ledger: str = MAIN_LEDGER
+    # Machine-specific build settings per project ([projects.<p>.build]).
+    build_settings: dict = dataclasses.field(default_factory=dict)
 
     def project(self, name: str) -> Project:
         try:
@@ -401,6 +404,7 @@ def _load_project(root: Path, name: str, raw: dict) -> Project:
         sweep_order=tuple(spec.get("runs", {}).get("sweep_order", ())),
         generated_areas=generated,
         areas_source=areas_source,
+        kconfig_map=bool(scope.get("kconfig_map", False)),
     )
 
 
@@ -417,4 +421,6 @@ def load_config(path: Path | None = None) -> Config:
         projects={
             name: _load_project(root, name, p) for name, p in raw.get("projects", {}).items()
         },
+        build_settings={name: p["build"] for name, p in raw.get("projects", {}).items()
+                        if isinstance(p.get("build"), dict)},
     )

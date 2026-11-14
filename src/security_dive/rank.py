@@ -6,8 +6,9 @@ the likeliest code first. A unit's **score** is its area priority plus:
 - a bonus for **signals** in its text (deterministic, computed at indexing):
   packet and PDU accessors, copies, length arithmetic, syscall verification,
   assertion-only checks, reference counting, handler-like names;
-- an adjustment for **builds** (`sdive build`), once any are recorded: code no
-  recorded build compiles sinks;
+- an adjustment for **builds** (`sdive build`), once any are recorded: `.c`
+  code no recorded build compiles sinks (headers are not judged: compile
+  databases list only translation units);
 - an adjustment for **reach**, the cheap `sdive-ranker` agent's judgement of
   how directly an attacker reaches the function (`/sdive-rank`).
 
@@ -91,7 +92,8 @@ def rescore(conn: sqlite3.Connection, snap: int) -> int:
     the snapshot's recorded builds (if any) and recorded reach. Returns the
     number of units scored."""
     have_builds = conn.execute(
-        "SELECT 1 FROM file_builds WHERE snapshot_id = ? LIMIT 1", (snap,)).fetchone() is not None
+        "SELECT 1 FROM builds WHERE snapshot_id = ? AND status = 'ok' LIMIT 1",
+        (snap,)).fetchone() is not None
     built_paths = {r[0] for r in conn.execute(
         "SELECT DISTINCT path FROM file_builds WHERE snapshot_id = ?", (snap,))}
     reach = {r["unit_id"]: r["reach"] for r in conn.execute(
@@ -105,7 +107,8 @@ def rescore(conn: sqlite3.Connection, snap: int) -> int:
         conn.executemany(
             "UPDATE unit_versions SET score = ? WHERE snapshot_id = ? AND unit_id = ?",
             [(score(r["priority"], json.loads(r["signals"] or "{}"),
-                    (r["path"] in built_paths) if have_builds else None,
+                    (r["path"] in built_paths) if have_builds and r["path"].endswith(".c")
+                    else None,
                     reach.get(r["unit_id"])), snap, r["unit_id"]) for r in rows])
     return len(rows)
 

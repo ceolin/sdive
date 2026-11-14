@@ -388,36 +388,27 @@
     "property_violated": {
       "anyOf": [
         {
-          "enum": [
-            "P1",
-            "P2",
-            "P3",
-            "P4",
-            "P5",
-            "P6"
-          ],
+          "pattern": "^P[1-9]$",
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
+      "description": "Threat-model property, e.g. P1",
       "title": "Property Violated"
     },
     "attacker_class": {
       "anyOf": [
         {
-          "enum": [
-            "A1",
-            "A2",
-            "A3"
-          ],
+          "pattern": "^A[1-9]$",
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
+      "description": "Threat-model attacker class, e.g. A2",
       "title": "Attacker Class"
     },
     "vuln_class": {
@@ -597,7 +588,7 @@
     },
     "affected_configurations": {
       "default": [],
-      "description": "Build options (MCUBOOT_*/CONFIG_*) and ports it needs",
+      "description": "Build options (MCUBOOT_*/CONFIG_*), ports, boards or devicetree compatibles it needs",
       "items": {
         "type": "string"
       },

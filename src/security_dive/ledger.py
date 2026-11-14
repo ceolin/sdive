@@ -68,9 +68,17 @@ def indexed_snapshot(conn: sqlite3.Connection, project: str, sha: str) -> int:
     return row["id"]
 
 
-def index_units(conn: sqlite3.Connection, project: str, snap: int, units: list[Unit]) -> None:
-    """Replace the snapshot's unit_versions with `units` (coverage is unaffected)."""
+def index_units(conn: sqlite3.Connection, project: str, snap: int, units: list[Unit],
+                conditions: dict[str, list[str]] | None = None) -> None:
+    """Replace the snapshot's unit_versions with `units` (coverage is
+    unaffected), and its file conditions with `conditions` when given."""
     with conn:
+        if conditions is not None:
+            conn.execute("DELETE FROM file_conditions WHERE snapshot_id = ?", (snap,))
+            paths = {u.path for u in units}
+            conn.executemany(
+                "INSERT INTO file_conditions (snapshot_id, path, conditions) VALUES (?, ?, ?)",
+                [(snap, path, json.dumps(c)) for path, c in conditions.items() if path in paths])
         conn.execute("DELETE FROM unit_versions WHERE snapshot_id = ?", (snap,))
         for u in units:
             unit_id = conn.execute(
@@ -544,6 +552,7 @@ def brief(conn: sqlite3.Connection, cfg: Config, run_id: int) -> dict:
         out["targets"] = [dict(t) for t in targets]
         areas = sorted({t["area"] for t in targets})
         out["dossiers"] = {a: str(cfg.dossier_path(project.name, a)) for a in areas}
+        _add_enabled_by(conn, out, run["snapshot_id"], {t["path"] for t in targets})
     frow = conn.execute(
         "SELECT f.* FROM run_targets t JOIN findings f ON f.id = t.finding_id WHERE t.run_id = ?",
         (run_id,),
@@ -562,7 +571,26 @@ def brief(conn: sqlite3.Connection, cfg: Config, run_id: int) -> dict:
         }
         areas = sorted({project.area_for(loc["path"]).name for loc in locs})
         out["dossiers"] = {a: str(cfg.dossier_path(project.name, a)) for a in areas}
+        _add_enabled_by(conn, out, run["snapshot_id"], {loc["path"] for loc in locs})
     return out
+
+
+ENABLED_BY_NOTE = (
+    "enabled_by: per source file, the Kconfig conditions (ANDed) under which the build "
+    "system compiles it, read statically from CMakeLists.txt; an approximation that "
+    "ignores Kconfig dependencies and defaults. Check Kconfig when a claim depends on it."
+)
+
+
+def _add_enabled_by(conn: sqlite3.Connection, out: dict, snap: int, paths: set[str]) -> None:
+    if not paths:
+        return
+    rows = conn.execute(
+        f"SELECT path, conditions FROM file_conditions WHERE snapshot_id = ? AND path IN "
+        f"({','.join('?' * len(paths))})", (snap, *sorted(paths))).fetchall()
+    if rows:
+        out["enabled_by"] = {r["path"]: json.loads(r["conditions"]) for r in rows}
+        out["enabled_by_note"] = ENABLED_BY_NOTE
 
 
 # --- recording -------------------------------------------------------------

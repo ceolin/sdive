@@ -16,8 +16,9 @@ from rich.table import Table
 
 from . import areas as areas_mod
 from . import bench as bench_mod
+from . import build as build_mod
 from . import carry as carry_mod
-from . import launch, ledger, rank, repo, triage, writeup
+from . import kconfig, launch, ledger, rank, repo, triage, writeup
 from .config import MAIN_LEDGER, Config, ConfigError, Project, load_config
 from .db import connect
 from .schemas import CONTRACT_FILES, SCHEMAS, contract_schema
@@ -51,7 +52,8 @@ class Group(click.Group):
     def invoke(self, ctx: click.Context):
         try:
             return super().invoke(ctx)
-        except (ConfigError, ledger.LedgerError, repo.GitError, rank.RankError) as e:
+        except (ConfigError, ledger.LedgerError, repo.GitError, rank.RankError,
+                build_mod.BuildError) as e:
             raise click.ClickException(str(e)) from None
 
 
@@ -154,7 +156,8 @@ def units(c: Ctx, project: str, rev: str | None, show: bool) -> None:
         click.echo(f"note: reference {path} is not a submodule at {sha[:12]}; skipped", err=True)
     found = extract_tree(p, tree)
     snap = ledger.snapshot_id(c.conn, p.name, sha, ref)
-    ledger.index_units(c.conn, p.name, snap, found)
+    conditions = kconfig.file_conditions(tree) if p.kconfig_map else None
+    ledger.index_units(c.conn, p.name, snap, found, conditions)
 
     if show:
         for u in found:
@@ -212,6 +215,96 @@ def lenses(c: Ctx, project: str) -> None:
         click.echo(f"no lenses in {p.lenses_dir}")
     for name in names:
         click.echo(f"{name:28} {ledger.file_hash(ledger.lens_path(p, name))}")
+
+
+# --- builds ----------------------------------------------------------------
+
+
+@main.command("build")
+@click.argument("project")
+@click.argument("rev", required=False)
+@click.option("--only", "only", multiple=True,
+              help="Only builds whose name or source matches this glob (repeatable), "
+                   "e.g. 'wide-*' or 'suite:tests/net'.")
+@click.option("--jobs", "-j", type=int, default=max(1, (os.cpu_count() or 2) // 2),
+              show_default=True, help="Builds configured in parallel.")
+@click.option("--redo", is_flag=True, help="Configure again builds already recorded.")
+@click.option("--list", "show", is_flag=True, help="List the builds; configure nothing.")
+@click.option("--keep", is_flag=True, help="Keep build directories (work/builds/).")
+@pass_ctx
+def build_cmd(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], jobs: int,
+              redo: bool, show: bool, keep: bool) -> None:
+    """Configure the project's builds (CMake only) at REV and record which
+    sources each compiles; scores then demote code no build compiles."""
+    from .config import glob_match
+    p = c.project(project)
+    benv = build_mod.build_env(c.cfg, p)
+    sha, snap = _snapshot_for(c, p, rev)
+    tree = build_mod.ensure_workspace(c.cfg, p, sha, benv,
+                                      log=lambda m: click.echo(m, err=True))
+    defs = build_mod.load_defs(p, tree, benv)
+    if only:
+        defs = [d for d in defs if any(glob_match(g, d.name) or glob_match(g, d.source)
+                                       or d.source.startswith(g) for g in only)]
+    if show:
+        for d in defs:
+            click.echo(f"{d.name:48} {d.board:28} {d.app}  {' '.join(d.args)}")
+        click.echo(f"{len(defs)} builds")
+        return
+    if not redo:
+        done = {r[0] for r in c.conn.execute(
+            "SELECT name FROM builds WHERE snapshot_id = ? AND status = 'ok'", (snap,))}
+        defs = [d for d in defs if d.name not in done]
+    click.echo(f"configuring {len(defs)} builds, {jobs} at a time", err=True)
+    counts = {"ok": 0, "failed": 0}
+
+    def done_one(o: build_mod.Outcome) -> None:
+        build_mod.record(c.conn, snap, o)
+        counts["ok" if o.ok else "failed"] += 1
+        n = counts["ok"] + counts["failed"]
+        click.echo(f"[{n}/{len(defs)}] {'ok ' if o.ok else 'FAIL'} {o.build.name} "
+                   f"({o.build.board}, {len(o.files)} files)", err=True)
+
+    out_root = c.cfg.work / "builds" / p.name / sha[:12]
+    build_mod.run_all(tree, defs, out_root, benv, jobs, done_one, keep)
+    rank.rescore(c.conn, snap)
+    click.echo(f"ok {counts['ok']}, failed {counts['failed']}; rescored")
+
+
+@main.command("builds")
+@click.argument("project")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@click.option("--failed", is_flag=True, help="List failed builds with the end of their log.")
+@pass_ctx
+def builds_cmd(c: Ctx, project: str, rev: str | None, failed: bool) -> None:
+    """Recorded builds, and how much in-scope code no build compiles."""
+    p = c.project(project)
+    sha, snap = _snapshot_for(c, p, rev)
+    if failed:
+        for r in c.conn.execute("SELECT name, board, log FROM builds WHERE snapshot_id = ? "
+                                "AND status = 'failed' ORDER BY name", (snap,)):
+            tail = (r["log"] or "").strip().splitlines()[-3:]
+            click.echo(f"{r['name']} ({r['board']}):\n    " + "\n    ".join(tail))
+        return
+    by_status = dict(c.conn.execute(
+        "SELECT status, count(*) FROM builds WHERE snapshot_id = ? GROUP BY status",
+        (snap,)).fetchall())
+    rows = c.conn.execute(
+        """SELECT uv.priority, count(*) AS files,
+                  sum(EXISTS (SELECT 1 FROM file_builds fb WHERE fb.snapshot_id = uv.snapshot_id
+                              AND fb.path = u.path)) AS built
+           FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
+           WHERE uv.snapshot_id = ? AND u.kind = 'file' AND u.path LIKE '%.c'
+           GROUP BY uv.priority ORDER BY uv.priority DESC""", (snap,)).fetchall()
+    click.echo(f"{project} @ {sha[:12]}: builds ok {by_status.get('ok', 0)}, "
+               f"failed {by_status.get('failed', 0)}")
+    t = Table(title="in-scope .c files compiled by some recorded build")
+    for col in ("priority", ".c files", "built", "never built"):
+        t.add_column(col, justify="right")
+    for r in rows:
+        t.add_row(str(r["priority"]), str(r["files"]), str(r["built"]),
+                  str(r["files"] - r["built"]))
+    console.print(t)
 
 
 # --- ranking ---------------------------------------------------------------

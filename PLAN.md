@@ -362,36 +362,32 @@ In order:
    them. Reference trees come from the snapshot's `west.yml` (`west =
    "<name>"`, exported to `_west/<name>`): Mbed TLS, TF-PSA-Crypto and
    zcbor so far; TF-M, OpenThread and hostap as needed.
-3. **Builds: what does some legitimate configuration compile** (`sdive
-   build`, to build). There is no allyesconfig: arch/SoC/board and several
-   stacks are Kconfig choices, most driver symbols are enabled by devicetree
-   (`DT_HAS_<compat>_ENABLED`) rather than Kconfig, and arch features gate
-   subsystems (user mode needs an MPU/MMU; the BT controller is effectively
-   Nordic-only). Since the extractor keeps every `#if` branch, builds are
+3. **Builds: what does some legitimate configuration compile** — built
+   (`sdive build`, `sdive builds`). There is no allyesconfig: arch/SoC/board
+   and several stacks are Kconfig choices, most driver symbols are enabled
+   by devicetree (`DT_HAS_<compat>_ENABLED`), and arch features gate
+   subsystems. Since the extractor keeps every `#if` branch, builds are
    needed only for scoping, priority and telling agents what enables a
-   unit, so the input is the **union of several builds**, which need not be
-   realistic products. Three tiers:
-   - *Generic code* (kernel, lib, net, BT host, USB, mgmt, fs, settings,
-     shell): 5–6 wide builds on one or two boards — full network stack
-     (sockets, TLS, DNS, HTTP, MQTT, CoAP, LwM2M), BT host + controller on
-     `nrf52_bsim`, USB device and host classes, mcumgr over every transport,
-     user mode on `qemu_x86` or an MPU Cortex-M. Configs live in
-     `projects/zephyr/builds/` (board + overlay per build).
-   - *Drivers*: the `tests/drivers/build_all/*` suites (51 at present), which
-     compile drivers against fake devicetree nodes — Zephyr's own nearest
-     thing to allyes for drivers.
-   - *Arch/SoC*: one board per architecture family of interest. The
-     security-relevant part (syscall entry, MPU/MMU programming, fault
-     handling, TrustZone entry) is small enough to also scope by hand.
-   Builds run in a west workspace under `work/` with modules at the
-   snapshot's `west.yml` revisions, using `~/zephyrproject` only as a cache
-   (never written). Each build's `compile_commands.json` is recorded per
-   unit (which builds compile it); code no build compiles sinks to the
-   bottom. Alongside, a static **file → Kconfig map** from the `CMakeLists`
-   `*_ifdef(CONFIG_…)` lines and Kconfig defaults goes into briefs, so
-   verifiers and the writer can state what enables the code. A wide build
-   shows code *can* be built, not that products enable it; `default y` and
-   use by in-tree samples feed priority separately.
+   unit, so the input is the **union of many builds**, which need not be
+   realistic products. Builds are only *configured*: Zephyr writes
+   `compile_commands.json` at CMake time, ~8 s a build, so thousands are
+   affordable. `projects/zephyr/builds.toml` holds wide builds (full network
+   stack on `frdm_k64f` and with user mode on `qemu_x86`, BT host +
+   controller with LE Audio and with Mesh on `nrf52840dk`, USB device and
+   host, mcumgr over UDP/FS/shell and over BT, user mode on an MPU
+   Cortex-M) and suites: every scenario of Zephyr's `tests/drivers/build_all`,
+   `tests/{net,bluetooth,subsys,kernel,arch,lib}` and
+   `samples/{net,bluetooth,subsys}` on its first usable platform (2.3k
+   builds; native_sim and bsim are Linux-only and skipped). They run in a
+   west workspace under `work/west/` with modules at the snapshot's
+   `west.yml`, cloned with `~/zephyrproject` as `--path-cache` (never
+   written; its venv runs with `PYTHONDONTWRITEBYTECODE`). Code no build
+   compiles sinks in the queue. Headers are not judged (compile databases
+   list only translation units). Alongside, `sdive units` records a static
+   **file → Kconfig map** from the `CMakeLists` `*_ifdef(CONFIG_…)` chain,
+   which briefs carry as `enabled_by`. A build shows code *can* be built,
+   not that products enable it; `default y` and use by in-tree samples
+   still need judgement (the ranker and the agents).
 4. **Ranking** — built. Queues order by a score: area priority, plus a
    signal bonus computed at indexing (`net_buf_pull*`, `net_pkt_read*`,
    `sys_get_le*`, zcbor decoding, copies, length arithmetic, `z_vrfy_*` /
@@ -425,17 +421,17 @@ In order:
 8. Coverage reporting per area and lens — built: `sdive coverage --by-lens`
    (covered/applicable functions per area and lens), `--lens` counting only
    where the lens applies, `--min-priority` to keep the table readable.
-9. **Write-up per project.** The write-up step is MCUboot-flavoured: the
-  `WriteupResult` schema fixes `property_violated` to P1–P6 and
-  `attacker_class` to A1–A3, and the `sdive-writer` prompt carries MCUboot's
-  attack-vector guidance, reachable-surface vocabulary and `MCUBOOT_*`
-  configuration examples, and produces the `mcuboot-deep-analyst` field set.
-  Before the first Zephyr write-up: take the property and attacker values
-  from the project's threat model (or drop them where it has none), give the
-  writer per-project guidance (Zephyr's surfaces: network, Bluetooth, USB,
-  syscalls; Kconfig and boards), and emit the `zepsec-deep-analyst` field
-  set for Zephyr. zepsec's intake keys on the export's `project`
-  (`../zepsec/sdive-intake.md`).
+9. **Write-up per project** — built. `property_violated` and
+   `attacker_class` are checked against the labels the project's threat
+   model defines (Zephyr: P1–P6, A1–A6) instead of a fixed P1–P6/A1–A3; the
+   export schema widened accordingly (still `sdive-export/1`: MCUboot
+   documents are unchanged). The `sdive-writer` prompt is project-neutral
+   and reads `projects/<p>/writer.md` (named in the brief): attack-vector
+   and privilege mapping per attacker class, the `reachable_surface`
+   vocabulary (Zephyr: zepsec-deep-analyst's, plus `syscall`), how to name
+   configurations (Kconfig, devicetree compatibles, using `enabled_by`) and
+   versions. Zephyr exports carry the `zepsec-deep-analyst` field set plus
+   property and attacker class, which zepsec's intake tolerates.
 
 ### Phase 5 — Zephyr incremental
 Post-merge change review on `main`, then PRs; possibly sharing the commit walk

@@ -255,6 +255,16 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX unit_reach_lookup ON unit_reach(snapshot_id, unit_id);
     """,
+    # v8: what enables each source file, from the build system (Zephyr's
+    # CMakeLists *_ifdef(CONFIG_...) chain); JSON list of conditions, ANDed.
+    """
+    CREATE TABLE file_conditions (
+        snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+        path         TEXT NOT NULL,
+        conditions   TEXT NOT NULL,
+        PRIMARY KEY (snapshot_id, path)
+    );
+    """,
 ]
 
 

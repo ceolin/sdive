@@ -1,6 +1,6 @@
 ---
 name: sdive-writeup
-description: Write up and export security-dive clusters — for each tracked cluster, have the sdive-writer subagent draft the advisory (zepsec's MCUboot result.json shape), record and show it, revise on the user's feedback, approve, and export it to analysis/exports/ for zepsec's client-side tools. Invoke as /sdive-writeup <project> [cluster...|N] [--parallel P] [--ledger X]. Use after /sdive-triage.
+description: Write up and export security-dive clusters — for each tracked cluster, have the sdive-writer subagent draft the advisory (zepsec's result.json shape for the project), record and show it, revise on the user's feedback, approve, and export it to analysis/exports/ for zepsec's client-side tools. Invoke as /sdive-writeup <project> [cluster...|N] [--parallel P] [--ledger X]. Use after /sdive-triage.
 argument-hint: "<project> [cluster...|N] [--parallel P] [--ledger main]"
 allowed-tools: Bash, Read, Agent, SendMessage, AskUserQuestion
 ---
