@@ -1112,16 +1112,23 @@ def bench() -> None:
 @click.argument("corpus", nargs=-1, required=True,
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--name", required=True, help="Truth set name, e.g. vanessa.")
+@click.option("--at", "at_rev", help="Silent-fix corpora: keep only items live at this "
+              "commit (fixed after it, affected function present), sited there.")
+@click.option("--paths", multiple=True, help="With --at: only items sited under these globs.")
 @pass_ctx
-def bench_import(c: Ctx, project: str, corpus: tuple[Path, ...], name: str) -> None:
+def bench_import(c: Ctx, project: str, corpus: tuple[Path, ...], name: str,
+                 at_rev: str | None, paths: tuple[str, ...]) -> None:
     """Import ground truth from zepsec-style analysis directories."""
-    c.project(project)
-    data = bench_mod.save_truth(c.cfg, project, name, list(corpus))
+    p = c.project(project)
+    at = repo.resolve(c.cfg, p, at_rev) if at_rev else None
+    data = bench_mod.save_truth(c.cfg, project, name, list(corpus), at, list(paths) or None)
     counts = defaultdict(int)
     for item in data["items"]:
         counts[item["verdict"]] += 1
     click.echo(f"{bench_mod.truth_path(c.cfg, project, name)}: {len(data['items'])} items "
                f"({', '.join(f'{k} {v}' for k, v in sorted(counts.items()))})")
+    if data["dropped"]:
+        click.echo("dropped: " + ", ".join(f"{k} {v}" for k, v in data["dropped"].items()))
 
 
 @bench.command("report")

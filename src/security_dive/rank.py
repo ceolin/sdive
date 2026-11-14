@@ -120,7 +120,7 @@ def rescore(conn: sqlite3.Connection, snap: int) -> int:
 # not ledger runs (no coverage, no findings): a brief in staging leases its
 # units until it is recorded or deleted.
 
-RANK_MAX_FUNCTIONS = 120
+RANK_MAX_FUNCTIONS = 80
 
 
 def _outstanding(cfg: Config) -> set[str]:

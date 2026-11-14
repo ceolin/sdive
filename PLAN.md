@@ -417,7 +417,10 @@ In order:
 7. **Blind benchmark** — a truth set imported from zepsec's Zephyr corpus at
    a commit preceding several known fixes, run over a narrow scope (net and
    Bluetooth) to calibrate lenses and the threat model before `main`, as
-   Phase 1 did for MCUboot.
+   Phase 1 did for MCUboot. Import is built (`sdive bench import --at REV
+   --paths …`: silent-fix units live at REV, sited at their affected
+   function there); choosing the corpus and commit, and running the round,
+   wait on the user (the corpus is embargoed zepsec material).
 8. Coverage reporting per area and lens — built: `sdive coverage --by-lens`
    (covered/applicable functions per area and lens), `--lens` counting only
    where the lens applies, `--min-priority` to keep the table readable.

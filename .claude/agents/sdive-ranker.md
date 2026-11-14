@@ -26,11 +26,12 @@ given the path of a **rank brief** (JSON).
 
 ## How to work
 
-Work file by file. Read the file (skim long ones; the function list gives line
-ranges). For each function decide where its inputs come from: who calls it
-(Grep for the symbol, callback registrations, handler tables, `__syscall`
-declarations) and what data it handles. Spend about a minute per file;
-precision to one level is enough.
+Work file by file. Read the whole file, in chunks if it is long (the
+function list gives line ranges). For each function decide where its inputs
+come from: who calls it (Grep for the symbol, callback registrations, handler
+tables, `__syscall` declarations) and what data it handles. Every function
+gets looked at: never judge one from its name or signals alone. Precision to
+one level is enough, so keep each judgement quick.
 
 - **3** — parses or acts on attacker-controlled input directly: packet, PDU,
   descriptor, frame, option, CBOR/JSON payload, filesystem image data, or a

@@ -102,3 +102,35 @@ def test_import_and_report(tmp_path, cfg):
     assert r["summary"]["fp"]["raised"] == 1 and r["summary"]["fp"]["confirmed"] == 0
     assert r["summary"]["tp"]["pending"] == 1
     assert bench.load_judgments(cfg, "t") == {}  # main ledger is separate
+
+
+def test_import_silent_fixes_at_revision(tmp_path, cfg, upstream):
+    from .conftest import commit, git
+    base = git(upstream, "rev-parse", "HEAD")
+    (upstream / "src" / "util.c").write_text("int helper(void)\n{\n    return 2;\n}\n")
+    fix = commit(upstream, "fix helper")
+    p = cfg.project("demo")
+    repo.ensure_mirror(cfg, p)
+    c = tmp_path / "zcorpus"
+    units = {
+        "u1-live": {"is_vulnerability": "yes", "sha": fix, "cwe": "CWE-125",
+                    "affected_components": ["src"], "affected_functions": ["helper"],
+                    "advisory_summary": "helper bug"},
+        "u2-old": {"is_vulnerability": "yes", "sha": base,
+                   "affected_components": ["src/util.c"], "affected_functions": ["helper"]},
+        "u3-gone": {"is_vulnerability": "yes", "sha": fix,
+                    "affected_components": ["src/util.c"], "affected_functions": ["nope"]},
+        "u4-elsewhere": {"is_vulnerability": "no", "sha": fix,
+                         "affected_components": ["src/parser.c"],
+                         "affected_functions": ["check_len"]},
+    }
+    for name, res in units.items():
+        (c / name).mkdir(parents=True)
+        (c / name / "result.json").write_text(json.dumps(res))
+    data = bench.save_truth(cfg, "demo", "z", [c], at=base, paths=["src/util.c"])
+    assert [(i["id"], i["site"]) for i in data["items"]] == [
+        ("u1-live", {"path": "src/util.c", "line": 1, "function": "helper"})]
+    assert data["items"][0]["scanned_commit"] == base
+    assert data["dropped"] == {"fixed at or before the revision": 1,
+                               "no affected function at the revision": 1,
+                               "outside --paths": 1}

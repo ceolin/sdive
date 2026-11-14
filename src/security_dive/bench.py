@@ -83,22 +83,110 @@ def import_items(corpus_dirs: list[Path]) -> list[dict]:
                 "site": site,
                 "files": files,
                 "scanned_commit": disc.get("scanned_commit") or res.get("scanned_commit"),
+                "fix_sha": None if disc else res.get("sha"),
+                "functions": _as_list(res.get("affected_functions")),
                 "origin": str(d),
             })
     return items
+
+
+def _functions_at(mirror: Path, rev: str, path: str) -> dict[str, int]:
+    """Function name -> first start line in `path` at `rev` (empty if absent)."""
+    from .repo import GitError, git
+    from .units import extract_source
+
+    try:
+        text = git("-C", mirror, "show", f"{rev}:{path}")
+    except GitError:
+        return {}
+    out: dict[str, int] = {}
+    for u in extract_source(path, text.encode(), "x", 0):
+        if u.kind == "function" and u.symbol not in out:
+            out[u.symbol] = u.start_line
+    return out
+
+
+def _files_under(mirror: Path, rev: str, component: str) -> list[str]:
+    from .repo import GitError, git
+
+    component = component.split(":", 1)[0].rstrip("/")
+    try:
+        names = git("-C", mirror, "ls-tree", "-r", "--name-only", rev, "--", component)
+    except GitError:
+        return []
+    return [n for n in names.splitlines() if n.endswith((".c", ".h"))]
+
+
+def at_revision(items: list[dict], mirror: Path, rev: str,
+                paths: list[str] | None = None) -> tuple[list[dict], dict[str, int]]:
+    """Restrict silent-fix truth items (zepsec units whose `result.json` names
+    the fix commit `sha`, `affected_components` and `affected_functions`) to
+    those live at `rev`: fixed after it (the fix is not an ancestor of `rev`)
+    and with an affected function present there. Each kept item's site
+    becomes that function's location at `rev`. `paths` globs narrow the
+    scope by site. Returns the kept items and counts of what was dropped."""
+    import subprocess
+
+    from .config import glob_match
+
+    dropped: dict[str, int] = {}
+    def drop(why: str) -> None:
+        dropped[why] = dropped.get(why, 0) + 1
+    kept = []
+    for item in items:
+        fix = item.get("fix_sha")
+        if not fix:
+            drop("no fix commit")
+            continue
+        r = subprocess.run(["git", "-C", str(mirror), "merge-base", "--is-ancestor", fix, rev],
+                           capture_output=True)
+        if r.returncode == 0:
+            drop("fixed at or before the revision")
+            continue
+        if r.returncode != 1:
+            drop("fix commit unknown to the mirror")
+            continue
+        site = None
+        for comp in item["files"]:
+            for path in _files_under(mirror, rev, comp):
+                fns = _functions_at(mirror, rev, path)
+                hit = next((f for f in item.get("functions", []) if f in fns), None)
+                if hit:
+                    site = {"path": path, "line": fns[hit], "function": hit}
+                    break
+            if site:
+                break
+        if site is None:
+            drop("no affected function at the revision")
+            continue
+        if paths and not any(glob_match(g, site["path"]) for g in paths):
+            drop("outside --paths")
+            continue
+        kept.append({**item, "site": site, "scanned_commit": rev,
+                     "files": [site["path"], *[f for f in item["files"] if f != site["path"]]]})
+    return kept, dropped
 
 
 def truth_path(cfg: Config, project: str, name: str) -> Path:
     return cfg.truth_dir / project / f"{name}.json"
 
 
-def save_truth(cfg: Config, project: str, name: str, corpus_dirs: list[Path]) -> dict:
+def save_truth(cfg: Config, project: str, name: str, corpus_dirs: list[Path],
+               at: str | None = None, paths: list[str] | None = None) -> dict:
+    """Import truth; with `at` (a commit SHA), silent-fix corpora are
+    restricted to the items live at that commit (see `at_revision`)."""
+    items = import_items(corpus_dirs)
+    dropped: dict[str, int] = {}
+    if at is not None:
+        items, dropped = at_revision(items, cfg.mirror_path(project), at, paths)
     data = {
         "name": name,
         "project": project,
         "imported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "sources": [str(c) for c in corpus_dirs],
-        "items": import_items(corpus_dirs),
+        "at": at,
+        "dropped": dropped,
+        "items": items,
     }
     path = truth_path(cfg, project, name)
     path.parent.mkdir(parents=True, exist_ok=True)

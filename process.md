@@ -164,7 +164,7 @@ before trusting a lens or prompt change on current code.
 
 | Step | What it does |
 |---|---|
-| `sdive bench import <p> <corpus>... --name <set>` | Imports ground truth from zepsec-style analysis directories into `analysis/truth/<p>/<set>.json`. |
+| `sdive bench import <p> <corpus>... --name <set> [--at REV] [--paths GLOB]` | Imports ground truth from zepsec-style analysis directories into `analysis/truth/<p>/<set>.json`. Disclosure corpora (MCUboot's) carry their own sites. Silent-fix corpora (Zephyr's: `result.json` naming the fix commit `sha`, `affected_components`, `affected_functions`) need `--at REV`: only items fixed after REV whose affected function exists at REV are kept, sited at that function; `--paths` narrows by site (e.g. net and Bluetooth). |
 | `/sdive-bench <p> <set> --rev <commit>` | Creates a fresh ledger (`bench-<set>-<date>`), runs sweeps and dives at `<commit>`, verifies every hypothesis, then scores. |
 | `sdive --ledger <round> bench report <p> <set> --rev <commit>` | Scores the round: location matches against truth items are only *candidates*. |
 | `sdive --ledger <round> bench judge <p> <set> <item> <slug>...` | Records, by human judgement, which findings really raise each truth item (`adjudication.json`). |
