@@ -21,6 +21,10 @@ changes.
   moving it into MCUboot's own documentation (see Threat model upstreaming
   below), after which `config.toml` points at that copy instead;
   `ghsa.db`, the Vanessa disclosures and prior findings form the **dedup corpus**.
+- Zephyr has no equivalent: `projects/zephyr/threat-model.md` is written here
+  (drafted 2026-11-14), making explicit the rules zepsec's Zephyr analyst
+  applies implicitly; once the team settles its open rulings it is a
+  candidate for Zephyr's own documentation, as MCUboot's is.
 
 ## Execution model: skills do the thinking, the CLI does the bookkeeping
 
@@ -316,18 +320,96 @@ a cluster's membership clears its track.
 - Findings follow the disclosure policy above: PR comment, quiet fix, or GHSA.
 
 ### Phase 4 — Zephyr breadth
-- Mirror with `--reference ~/zephyrproject/zephyr`. Areas from `MAINTAINERS.yml`.
-- Representative build configs → `compile_commands.json` → which code is
-  actually built. Code nothing realistic builds sinks to the bottom. *Which
-  configs count as representative is deferred to a discussion with the Zephyr
-  security team.*
-- `/sdive-rank` (cheap subagent) scores units for attacker reachability and
-  parsing/length arithmetic; Mythos time goes to the top of the queue.
-  Priority surfaces: IP/TCP/DNS, LwM2M/CoAP/MQTT, Bluetooth host + controller,
-  USB device classes, the userspace syscall boundary (`z_vrfy_*`), drivers fed by
-  external buses.
-- Coverage reporting per area and lens.
-- **Write-up per project.** The write-up step is MCUboot-flavoured: the
+
+Scale sets the shape. C source at a 2026-11 `main` (lines, excluding
+`tests/` and `samples/`): `drivers/` 1.62M, `subsys/` 886k (Bluetooth 397k,
+net 262k, USB 43k, mgmt 29k), `soc/` 91k, `arch/` 52k, `modules/` 37k, `lib/`
+26k, `kernel/` 20k. The main attack surfaces alone (net, Bluetooth, USB,
+mgmt) are about 30× MCUboot's core, so ranking and per-lens scoping are
+required, not optional. The unit extractor needs no change: a trial on
+`kernel/`, `subsys/net`, `subsys/bluetooth/host`, `subsys/usb` and
+`drivers/usb` (582 files, ~15.4k functions) matched every column-0 `}` in the
+files checked by hand, `#if` variants included, and `z_vrfy_*` handlers come
+out as ordinary units.
+
+In order:
+
+1. **Threat model** — drafted at `projects/zephyr/threat-model.md` (Zephyr
+   has none of its own beyond user mode's and the sensor model). Properties
+   P1–P6 (kernel integrity, user-mode isolation, secure-world isolation,
+   confidentiality, protocol security, availability), attacker classes A1–A6
+   (remote network, adjacent/radio, bus peer, unprivileged user thread,
+   non-secure world, physical), and the rules that suppress the common false
+   positives: privilege differential, no syscall boundary without
+   `CONFIG_USERSPACE`, assertions are not checks. Rulings marked **Open**
+   (bus peers, BT host vs. controller, shell, samples) go to the Zephyr
+   security team together with the build list below; agents apply the
+   proposals until then. Keep finding references out of it, as for MCUboot.
+2. **Project definition** — `projects/zephyr/project.toml`: scope `kernel`,
+   `arch`, `soc`, `lib`, `subsys`, `drivers`, in-tree `modules/` glue;
+   exclude tests, samples, `subsys/testsuite`. Areas generated from
+   `MAINTAINERS.yml` (its `files:` globs; a generator command, to build),
+   with priorities set by hand on top. Reference trees from the snapshot's
+   `west.yml` rather than `.gitmodules` (Mbed TLS / TF-PSA-Crypto first, then
+   TF-M, OpenThread, HALs as needed).
+3. **Builds: what does some legitimate configuration compile** (`sdive
+   build`, to build). There is no allyesconfig: arch/SoC/board and several
+   stacks are Kconfig choices, most driver symbols are enabled by devicetree
+   (`DT_HAS_<compat>_ENABLED`) rather than Kconfig, and arch features gate
+   subsystems (user mode needs an MPU/MMU; the BT controller is effectively
+   Nordic-only). Since the extractor keeps every `#if` branch, builds are
+   needed only for scoping, priority and telling agents what enables a
+   unit, so the input is the **union of several builds**, which need not be
+   realistic products. Three tiers:
+   - *Generic code* (kernel, lib, net, BT host, USB, mgmt, fs, settings,
+     shell): 5–6 wide builds on one or two boards — full network stack
+     (sockets, TLS, DNS, HTTP, MQTT, CoAP, LwM2M), BT host + controller on
+     `nrf52_bsim`, USB device and host classes, mcumgr over every transport,
+     user mode on `qemu_x86` or an MPU Cortex-M. Configs live in
+     `projects/zephyr/builds/` (board + overlay per build).
+   - *Drivers*: the `tests/drivers/build_all/*` suites (51 at present), which
+     compile drivers against fake devicetree nodes — Zephyr's own nearest
+     thing to allyes for drivers.
+   - *Arch/SoC*: one board per architecture family of interest. The
+     security-relevant part (syscall entry, MPU/MMU programming, fault
+     handling, TrustZone entry) is small enough to also scope by hand.
+   Builds run in a west workspace under `work/` with modules at the
+   snapshot's `west.yml` revisions, using `~/zephyrproject` only as a cache
+   (never written). Each build's `compile_commands.json` is recorded per
+   unit (which builds compile it); code no build compiles sinks to the
+   bottom. Alongside, a static **file → Kconfig map** from the `CMakeLists`
+   `*_ifdef(CONFIG_…)` lines and Kconfig defaults goes into briefs, so
+   verifiers and the writer can state what enables the code. A wide build
+   shows code *can* be built, not that products enable it; `default y` and
+   use by in-tree samples feed priority separately.
+4. **Ranking** — a deterministic pass first (area priority × built ×
+   signals such as `net_buf_pull*`, `net_pkt_read*`, `z_vrfy_*`, lengths
+   taken from packets feeding copies), then `/sdive-rank` (cheap subagent)
+   scoring units for attacker reachability and parsing/length arithmetic;
+   Mythos time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
+   LwM2M/CoAP/MQTT, Bluetooth host + controller, USB device and host
+   classes, the user-mode syscall boundary, mcumgr, drivers fed by external
+   buses.
+5. **Lens applicability** (to build) — a lens names the areas or globs it
+   applies to (frontmatter), and sweeps and `sdive todo` honour it: a
+   syscall-boundary lens over Bluetooth is wasted work, and at this scale
+   every lens over everything is unaffordable.
+6. **Zephyr lenses** — shaped by surface and bug class rather than by
+   property, since Zephyr has no single asset: `memory-safety` (lengths and
+   offsets from `net_buf`/`net_pkt`, descriptors, PDUs), `lifetime`
+   (reference counting, use after disconnect or teardown, `k_work` cancel
+   races, ISR/thread races), `protocol-state` (state machines receiving a
+   PDU in the wrong state: TCP, L2CAP/ATT/SMP, ISO, LwM2M), `syscall-boundary`
+   (`K_SYSCALL_*` checks, copy-before-use, size arithmetic, object
+   permissions), `protocol-security` (pairing and key checks, randomness
+   where protocols rely on it, TLS peer verification), and `holistic` for
+   dives.
+7. **Blind benchmark** — a truth set imported from zepsec's Zephyr corpus at
+   a commit preceding several known fixes, run over a narrow scope (net and
+   Bluetooth) to calibrate lenses and the threat model before `main`, as
+   Phase 1 did for MCUboot.
+8. Coverage reporting per area and lens.
+9. **Write-up per project.** The write-up step is MCUboot-flavoured: the
   `WriteupResult` schema fixes `property_violated` to P1–P6 and
   `attacker_class` to A1–A3, and the `sdive-writer` prompt carries MCUboot's
   attack-vector guidance, reachable-surface vocabulary and `MCUBOOT_*`
@@ -360,6 +442,9 @@ should be better for having been used first.
 
 ## Open questions
 
-1. Zephyr representative configs — deferred to a discussion with the team.
+1. Zephyr representative configs — approach decided (union of wide builds in
+   three tiers, Phase 4 step 3); the exact build list and the threat model's
+   **Open** rulings (bus peers, BT host vs. controller, shell, samples) go to
+   the Zephyr security team.
 2. Exact zepsec hand-off schema — to be pinned when Phase 2 produces the first
    verified finding.

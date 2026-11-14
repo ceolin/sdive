@@ -17,3 +17,4 @@ github = "zephyrproject-rtos/zephyr"
 upstream = "https://github.com/zephyrproject-rtos/zephyr.git"
 reference_repo = "/Users/davidb/zephyrproject/zephyr"
 default_branch = "main"
+threat_model = "projects/zephyr/threat-model.md"  # draft; Open rulings pending the Zephyr security team
