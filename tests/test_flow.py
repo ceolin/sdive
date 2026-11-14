@@ -279,14 +279,15 @@ def test_absent_reference_is_skipped_and_noted(root, cfg, indexed):
 
 def test_dive_batch_respects_line_budget(cfg, indexed):
     p, conn, snap, _sha, _tree = indexed
-    # check_len is 4 lines, parse 1, parse@2 4: a 5-line budget takes two.
+    # parse (1 line) and parse@2 (4) outscore check_len (4): their handler-like
+    # name is a ranking signal. A 5-line budget takes the two best.
     run = ledger.next_unit_run(conn, p, snap, "dive", "memory", max_lines=5)
     keys = [t["key"] for t in ledger.brief(conn, cfg, run)["targets"]]
-    assert keys == ["src/parser.c::check_len", "src/parser.c::parse"]
+    assert keys == ["src/parser.c::parse", "src/parser.c::parse@2"]
     # A function larger than the budget still goes alone.
     run2 = ledger.next_unit_run(conn, p, snap, "dive", "memory", area="parsing", max_lines=1)
     assert [t["key"] for t in ledger.brief(conn, cfg, run2)["targets"]] == [
-        "src/parser.c::parse@2"]
+        "src/parser.c::check_len"]
 
 
 def test_sweep_batches_whole_areas_and_estimate(cfg, indexed):
@@ -426,3 +427,33 @@ def test_run_minutes_median_and_defaults(cfg, indexed):
         conn.execute("DELETE FROM runs WHERE id = (SELECT max(id) FROM runs)")
     m, n = ledger.run_minutes([conn], p.name)["dive"]
     assert n == 2 and abs(m - 3.0) < 0.01  # median of 1 and 5
+
+
+def test_lens_applicability_scopes_queue_and_coverage(cfg, indexed):
+    p, conn, snap, _sha, _tree = indexed
+    (p.lenses_dir / "parsers.md").write_text(
+        "---\napplies:\n  areas: [pars*]\n  symbols: [helper]\n  exclude_areas: []\n---\n"
+        "# Lens: parsers\n")
+    (p.lenses_dir / "high.md").write_text("---\napplies:\n  min_priority: 5\n---\n# high\n")
+    scope = ledger.lens_scope(p, "parsers")
+    assert scope.applies("parsing", "src/parser.c", "parse", 5)
+    assert scope.applies("misc", "src/util.c", "helper", 1)      # by symbol
+    assert not scope.applies("misc", "src/util.c", "other", 1)
+    assert ledger.lens_scope(p, "memory") == ledger.LensScope()   # no frontmatter
+    est = ledger.queue_estimate(conn, p, snap, "sweep", "high")
+    assert [r["areas"] for r in est] == [["parsing"]]              # misc is priority 1
+    run = ledger.next_unit_run(conn, p, snap, "sweep", "high")
+    ledger.record(conn, cfg, run, audit(run, [(t["key"], "clean") for t in
+                                              ledger.brief(conn, cfg, run)["targets"]]))
+    assert ledger.next_unit_run(conn, p, snap, "sweep", "high") is None
+    m = ledger.coverage_matrix(conn, p, snap)
+    cells = {a["area"]: a["lenses"] for a in m["areas"]}
+    assert cells["parsing"]["high"] == [3, 3]
+    assert cells["misc"]["high"] == [0, 0]                          # not applicable
+    assert cells["misc"]["parsers"] == [0, 1]
+    rows = ledger.coverage_by_area(conn, snap, [ledger.register_lens(conn, p, "high")],
+                                   ledger.lens_scope(p, "high"))
+    assert [(r["area"], r["functions"], r["swept"]) for r in rows] == [("parsing", 3, 3)]
+    (p.lenses_dir / "bad.md").write_text("---\napplies:\n  area: [x]\n---\n")
+    with pytest.raises(ledger.LedgerError, match="unknown applies keys"):
+        ledger.lens_scope(p, "bad")

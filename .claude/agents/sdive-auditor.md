@@ -48,8 +48,8 @@ Everything you need is reachable from it.
 
 A **hypothesis** is a concrete defect in this project's code with: the code
 location(s); the attacker-controlled input and the path from an entry point to
-the defect; the attacker class (A1/A2/A3) and the property violated (P1–P6)
-from the threat model; the configuration it needs; and a CWE if one fits.
+the defect; the attacker class and the property violated, as the threat model
+defines them (e.g. A2, P1); the configuration it needs; and a CWE if one fits.
 Recall matters — an independent verifier will try to refute each hypothesis — so
 raise plausible defects at `low`/`medium` confidence rather than dropping them,
 but never raise vague concerns with no attacker path. Write `claim` so that a

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -13,6 +14,7 @@ import tree_sitter_c
 from tree_sitter import Language, Node, Parser
 
 from .config import Project
+from .rank import signals as rank_signals
 
 _C = Language(tree_sitter_c.language())
 
@@ -28,6 +30,7 @@ class Unit:
     content_hash: str
     area: str
     priority: int
+    signals: str = "{}"  # JSON: ranking signal hit counts (functions only)
 
 
 def content_hash(data: bytes) -> str:
@@ -206,6 +209,7 @@ def extract_source(path: str, data: bytes, area: str, priority: int) -> list[Uni
     for name, start, end in _find_spans(data):
         seen[name] += 1
         key = f"{path}::{name}" if seen[name] == 1 else f"{path}::{name}@{seen[name]}"
+        body = b"\n".join(lines[start - 1 : end])
         units.append(
             Unit(
                 key=key,
@@ -214,9 +218,11 @@ def extract_source(path: str, data: bytes, area: str, priority: int) -> list[Uni
                 symbol=name,
                 start_line=start,
                 end_line=end,
-                content_hash=content_hash(b"\n".join(lines[start - 1 : end])),
+                content_hash=content_hash(body),
                 area=area,
                 priority=priority,
+                signals=json.dumps(rank_signals(body.decode(errors="replace"), name),
+                                   sort_keys=True),
             )
         )
     return units

@@ -392,33 +392,39 @@ In order:
    verifiers and the writer can state what enables the code. A wide build
    shows code *can* be built, not that products enable it; `default y` and
    use by in-tree samples feed priority separately.
-4. **Ranking** — a deterministic pass first (area priority × built ×
-   signals such as `net_buf_pull*`, `net_pkt_read*`, `z_vrfy_*`, lengths
-   taken from packets feeding copies), then `/sdive-rank` (cheap subagent)
-   scoring units for attacker reachability and parsing/length arithmetic;
-   Mythos time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
+4. **Ranking** — built. Queues order by a score: area priority, plus a
+   signal bonus computed at indexing (`net_buf_pull*`, `net_pkt_read*`,
+   `sys_get_le*`, zcbor decoding, copies, length arithmetic, `z_vrfy_*` /
+   `K_SYSCALL_*`, assertion-only length checks, refcounting, handler-like
+   names; capped at +1.5), plus the reach judged by `/sdive-rank` (the
+   `sdive-ranker` subagent on Sonnet, file by file, 0–3 → −2 … +1.5),
+   minus 1.5 for code no recorded build compiles once builds exist. Mythos
+   time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
    LwM2M/CoAP/MQTT, Bluetooth host + controller, USB device and host
    classes, the user-mode syscall boundary, mcumgr, drivers fed by external
    buses.
-5. **Lens applicability** (to build) — a lens names the areas or globs it
-   applies to (frontmatter), and sweeps and `sdive todo` honour it: a
-   syscall-boundary lens over Bluetooth is wasted work, and at this scale
-   every lens over everything is unaffordable.
-6. **Zephyr lenses** — shaped by surface and bug class rather than by
-   property, since Zephyr has no single asset: `memory-safety` (lengths and
-   offsets from `net_buf`/`net_pkt`, descriptors, PDUs), `lifetime`
-   (reference counting, use after disconnect or teardown, `k_work` cancel
-   races, ISR/thread races), `protocol-state` (state machines receiving a
-   PDU in the wrong state: TCP, L2CAP/ATT/SMP, ISO, LwM2M), `syscall-boundary`
-   (`K_SYSCALL_*` checks, copy-before-use, size arithmetic, object
-   permissions), `protocol-security` (pairing and key checks, randomness
-   where protocols rely on it, TLS peer verification), and `holistic` for
-   dives.
+5. **Lens applicability** — built: a lens's YAML frontmatter (`applies:`
+   area/path/symbol globs, `exclude_areas`, `min_priority`) limits sweeps,
+   `sdive todo` and coverage to the units it fits.
+6. **Zephyr lenses** — written (`projects/zephyr/lenses/`, before looking at
+   any benchmark corpus): `memory-safety` (priority ≥ 4; lengths and
+   offsets from `net_buf`/`net_pkt`, descriptors, PDUs, reassembly),
+   `lifetime` (reference counting, teardown during pending operations, slot
+   reuse, ISR/thread races, per-message leaks), `protocol-state` (messages
+   in the wrong state, identifiers, negotiated parameters), `syscall-boundary`
+   (`K_SYSCALL_*` checks, copy-before-use, object permissions, arch entry and
+   memory domains), `protocol-security` (pairing and key checks, replay,
+   security levels, TLS verification, randomness, secrets), and `holistic`
+   for dives. At 2026-11 `main`, one sweep per lens is 18–420 runs
+   (syscall-boundary 41k lines … memory-safety 1.0M), which is why the top
+   of the ranked queue, not completion, is the target.
 7. **Blind benchmark** — a truth set imported from zepsec's Zephyr corpus at
    a commit preceding several known fixes, run over a narrow scope (net and
    Bluetooth) to calibrate lenses and the threat model before `main`, as
    Phase 1 did for MCUboot.
-8. Coverage reporting per area and lens.
+8. Coverage reporting per area and lens — built: `sdive coverage --by-lens`
+   (covered/applicable functions per area and lens), `--lens` counting only
+   where the lens applies, `--min-priority` to keep the table readable.
 9. **Write-up per project.** The write-up step is MCUboot-flavoured: the
   `WriteupResult` schema fixes `property_violated` to P1–P6 and
   `attacker_class` to A1–A3, and the `sdive-writer` prompt carries MCUboot's

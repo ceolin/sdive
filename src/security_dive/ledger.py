@@ -12,8 +12,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from . import repo
-from .config import Config, ConfigError, Project
+from . import rank, repo
+from .config import Config, ConfigError, Project, glob_match
 from .schemas import AuditResult, VerifyResult
 from .units import Unit
 
@@ -80,10 +80,13 @@ def index_units(conn: sqlite3.Connection, project: str, snap: int, units: list[U
                 (project, u.key, u.kind, u.path, u.symbol),
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO unit_versions VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (snap, unit_id, u.content_hash, u.area, u.priority, u.start_line, u.end_line),
+                "INSERT INTO unit_versions (snapshot_id, unit_id, content_hash, area, priority, "
+                "start_line, end_line, signals) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (snap, unit_id, u.content_hash, u.area, u.priority, u.start_line, u.end_line,
+                 u.signals),
             )
         conn.execute("UPDATE snapshots SET indexed_at = ? WHERE id = ?", (now(), snap))
+    rank.rescore(conn, snap)
 
 
 # --- lenses ----------------------------------------------------------------
@@ -113,6 +116,59 @@ def register_lens(conn: sqlite3.Connection, project: Project, name: str) -> int:
     ).fetchone()[0]
 
 
+@dataclass(frozen=True)
+class LensScope:
+    """Where a lens applies, from its frontmatter. A unit qualifies if its
+    area, path or symbol matches any listed glob (or nothing is listed), it
+    is not in `exclude_areas`, and its priority is at least `min_priority`."""
+
+    areas: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
+    symbols: tuple[str, ...] = ()
+    exclude_areas: tuple[str, ...] = ()
+    min_priority: int | None = None
+
+    def applies(self, area: str, path: str, symbol: str | None, priority: int) -> bool:
+        if self.min_priority is not None and priority < self.min_priority:
+            return False
+        if any(glob_match(g, area) for g in self.exclude_areas):
+            return False
+        if not (self.areas or self.paths or self.symbols):
+            return True
+        return (any(glob_match(g, area) for g in self.areas)
+                or any(glob_match(g, path) for g in self.paths)
+                or (symbol is not None and any(glob_match(g, symbol) for g in self.symbols)))
+
+    def filter(self, rows: list) -> list:
+        return [r for r in rows
+                if self.applies(r["area"], r["path"], r["symbol"], r["priority"])]
+
+
+SCOPE_KEYS = ("areas", "paths", "symbols", "exclude_areas", "min_priority")
+
+
+def lens_scope(project: Project, name: str) -> LensScope:
+    """The lens's applicability (`applies:` in YAML frontmatter between `---`
+    lines at the top of the file); everything when there is none."""
+    import yaml
+
+    text = lens_path(project, name).read_text()
+    if not text.startswith("---\n"):
+        return LensScope()
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        raise LedgerError(f"lens {name}: unterminated frontmatter")
+    meta = yaml.safe_load(text[4:end]) or {}
+    applies = meta.get("applies") or {}
+    unknown = set(applies) - set(SCOPE_KEYS)
+    if unknown:
+        raise LedgerError(f"lens {name}: unknown applies keys {sorted(unknown)}")
+    return LensScope(
+        **{k: tuple(applies.get(k, ())) for k in SCOPE_KEYS if k != "min_priority"},
+        min_priority=applies.get("min_priority"),
+    )
+
+
 def available_lenses(project: Project) -> list[str]:
     if not project.lenses_dir.is_dir():
         return []
@@ -138,7 +194,7 @@ def _uncovered_units(
     not leased by a recent started run of the same kind and lens."""
     sql = """
         SELECT u.id, u.key, u.path, u.symbol, uv.area, uv.priority,
-               uv.start_line, uv.end_line
+               coalesce(uv.score, uv.priority) AS score, uv.start_line, uv.end_line
         FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
         WHERE uv.snapshot_id = :snap AND u.kind = 'function'
           AND (:area IS NULL OR uv.area = :area)
@@ -152,7 +208,7 @@ def _uncovered_units(
               WHERE t.unit_id = uv.unit_id AND r.status = 'started'
                 AND r.kind = :kind AND r.lens_id = :lens
                 AND r.project = :project AND r.started_at > :cutoff)
-        ORDER BY uv.priority DESC, u.path, uv.start_line
+        ORDER BY coalesce(uv.score, uv.priority) DESC, u.path, uv.start_line
     """
     return conn.execute(
         sql,
@@ -195,13 +251,15 @@ SWEEP_MAX_LINES = 3000
 
 
 def _batch(rows: list, kind: str, max_units: int, max_lines: int | None) -> list:
-    """The targets of the next run, from uncovered `rows` in queue order.
+    """The targets of the next run, from uncovered `rows` in queue order
+    (score, then path and line; see rank.py).
 
-    A dive takes uncovered functions of one file (the first with work left), in
-    line order, up to `max_units` functions and `max_lines` lines, so each dive
-    stays deep. A sweep takes whole areas in priority order up to `max_lines`
-    lines, so cross-file reasoning within an area is kept while one pass stays
-    small enough to read properly. Both always take at least one unit/area.
+    A dive takes uncovered functions of one file (the top-scored one's), best
+    first, up to `max_units` functions and `max_lines` lines, so each dive
+    stays deep. A sweep takes whole areas in order of their best unit up to
+    `max_lines` lines, so cross-file reasoning within an area is kept while
+    one pass stays small enough to read properly (an area bigger than that
+    goes file by file). Both always take at least one unit/area.
     """
     def size(r) -> int:
         return r["end_line"] - r["start_line"] + 1
@@ -264,7 +322,8 @@ def next_unit_run(
     if area is not None:
         project.area_named(area)
     lens_id = register_lens(conn, project, lens)
-    rows = _uncovered_units(conn, project.name, snap, lens_id, kind, area)
+    rows = lens_scope(project, lens).filter(
+        _uncovered_units(conn, project.name, snap, lens_id, kind, area))
     if not rows:
         return None
     if kind == "dive":
@@ -311,7 +370,8 @@ def queue_estimate(
     if area is not None:
         project.area_named(area)
     lens_id = register_lens(conn, project, lens)
-    rows = list(_uncovered_units(conn, project.name, snap, lens_id, kind, area))
+    rows = lens_scope(project, lens).filter(
+        _uncovered_units(conn, project.name, snap, lens_id, kind, area))
     runs = []
     while rows:
         batch = _batch(rows, kind, max_units, max_lines)
@@ -765,27 +825,71 @@ def set_finding_status(
 # --- reports ---------------------------------------------------------------
 
 
+def _function_versions(conn: sqlite3.Connection, snap: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """SELECT uv.unit_id, uv.content_hash, uv.area, uv.priority, u.path, u.symbol,
+                  uv.end_line - uv.start_line + 1 AS lines
+           FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
+           WHERE uv.snapshot_id = ? AND u.kind = 'function'""", (snap,)).fetchall()
+
+
+def _covered_sets(conn: sqlite3.Connection, snap: int) -> dict[tuple[str, int | None], set[int]]:
+    """(run kind, lens id) -> unit ids covered at their current hash in `snap`."""
+    out: dict[tuple[str, int | None], set[int]] = {}
+    for r in conn.execute(
+            """SELECT DISTINCT r.kind, c.lens_id, c.unit_id
+               FROM coverage c JOIN runs r ON r.id = c.run_id
+               JOIN unit_versions uv ON uv.unit_id = c.unit_id AND uv.snapshot_id = ?
+                    AND uv.content_hash = c.content_hash
+               WHERE c.status IN ('clean', 'hypotheses')""", (snap,)):
+        out.setdefault((r["kind"], r["lens_id"]), set()).add(r["unit_id"])
+    return out
+
+
 def coverage_by_area(
-    conn: sqlite3.Connection, snap: int, lens_ids: list[int] | None
+    conn: sqlite3.Connection, snap: int, lens_ids: list[int] | None,
+    scope: LensScope | None = None,
 ) -> list[dict]:
     """Per area: function count, and how many are covered by a sweep / a dive
-    at their current content hash (under any of `lens_ids`, or any lens)."""
-    lens_filter = ""
-    params: list = [snap]
-    if lens_ids is not None:
-        lens_filter = f"AND c.lens_id IN ({','.join('?' * len(lens_ids))})" if lens_ids else "AND 0"
-    def covered(kind: str) -> str:
-        return f"""EXISTS (SELECT 1 FROM coverage c JOIN runs r ON r.id = c.run_id
-                   WHERE c.unit_id = uv.unit_id AND c.content_hash = uv.content_hash
-                   AND r.kind = '{kind}' AND c.status IN ('clean', 'hypotheses') {lens_filter})"""
-    sql = f"""
-        SELECT uv.area, max(uv.priority) AS priority, count(*) AS functions,
-               sum(uv.end_line - uv.start_line + 1) AS lines,
-               sum({covered('sweep')}) AS swept, sum({covered('dive')}) AS dived
-        FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
-        WHERE uv.snapshot_id = ? AND u.kind = 'function'
-        GROUP BY uv.area ORDER BY priority DESC, uv.area
-    """
-    if lens_ids:
-        params = [*lens_ids, *lens_ids, snap]
-    return [dict(r) for r in conn.execute(sql, params)]
+    at their current content hash (under any of `lens_ids`, or any lens).
+    With `scope`, only the functions the lens applies to are counted."""
+    covered = _covered_sets(conn, snap)
+    def union(kind: str) -> set[int]:
+        return set().union(*(ids for (k, lens), ids in covered.items()
+                             if k == kind and (lens_ids is None or lens in lens_ids)))
+    swept, dived = union("sweep"), union("dive")
+    areas: dict[str, dict] = {}
+    for u in _function_versions(conn, snap):
+        if scope is not None and not scope.applies(u["area"], u["path"], u["symbol"],
+                                                   u["priority"]):
+            continue
+        a = areas.setdefault(u["area"], {"area": u["area"], "priority": 0, "functions": 0,
+                                         "lines": 0, "swept": 0, "dived": 0})
+        a["priority"] = max(a["priority"], u["priority"])
+        a["functions"] += 1
+        a["lines"] += u["lines"]
+        a["swept"] += u["unit_id"] in swept
+        a["dived"] += u["unit_id"] in dived
+    return sorted(areas.values(), key=lambda a: (-a["priority"], a["area"]))
+
+
+def coverage_matrix(conn: sqlite3.Connection, project: Project, snap: int) -> dict:
+    """Per area and lens: (covered, applicable) functions, current lens
+    versions only. Sweep lenses count sweep coverage, `holistic` dives."""
+    names = available_lenses(project)
+    lenses = {n: (register_lens(conn, project, n), lens_scope(project, n)) for n in names}
+    covered = _covered_sets(conn, snap)
+    rows: dict[str, dict] = {}
+    for u in _function_versions(conn, snap):
+        a = rows.setdefault(u["area"], {"area": u["area"], "priority": 0, "functions": 0,
+                                        "lenses": {n: [0, 0] for n in names}})
+        a["priority"] = max(a["priority"], u["priority"])
+        a["functions"] += 1
+        for n, (lid, scope) in lenses.items():
+            if scope.applies(u["area"], u["path"], u["symbol"], u["priority"]):
+                cell = a["lenses"][n]
+                cell[1] += 1
+                kind = "dive" if n == "holistic" else "sweep"
+                cell[0] += u["unit_id"] in covered.get((kind, lid), ())
+    return {"lenses": names,
+            "areas": sorted(rows.values(), key=lambda a: (-a["priority"], a["area"]))}

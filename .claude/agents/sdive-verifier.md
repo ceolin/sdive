@@ -34,13 +34,18 @@ if you cannot, after checking every point below against the code.
    later (callees, re-validation) or by construction (types, constants). Search
    for it; don't assume.
 3. **Reachability:** a path exists from an attacker entry point to the defect,
-   for an attacker class in the threat model. Apply the flash-write boundary
-   precisely: which slot/trailer holds the controlled data, and who can write it
-   in this configuration (including the serial-recovery exception).
-4. **Impact:** it violates a named property P1–P6. Apply the scope rulings: a
-   path that fails closed is not a bypass; self-inflicted corruption that fails
-   closed is not P6; manipulating data later re-validated under the trusted key
-   needs the key; pre-auth recovery DoS is in scope.
+   for an attacker class in the threat model. Apply the threat model's boundary
+   rules precisely. MCUboot: the flash-write boundary (which slot/trailer holds
+   the controlled data, and who can write it in this configuration, including
+   the serial-recovery exception). Zephyr: the privilege differential, no
+   syscall boundary without `CONFIG_USERSPACE`, assertions are not checks, and
+   who checked the length (an earlier check counts only if the value cannot
+   change after it).
+4. **Impact:** it violates a named property of the threat model. Apply its
+   scope rulings, e.g. a path that fails closed is not a bypass; data later
+   re-validated under a trusted key needs the key; code built only for tests,
+   samples or debug shells is out of scope. Where a ruling is marked Open,
+   apply its proposal and say so in `reasoning`.
 5. **Configuration:** which options are required, and are they realistic for
    shipped products?
 6. **Libraries:** if the claim depends on what a library call does, confirm it in

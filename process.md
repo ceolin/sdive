@@ -16,6 +16,10 @@ as a benchmark round; the default is `main`.
 sdive init
 sdive mirror <p>
 sdive units <p> [REV]
+sdive areas <p> [--generate REV]
+    (large projects: order the queue before deep work)
+/sdive-rank <p> [N|all] --min-priority 4
+sdive rank show <p>
 
 # 2. Calibrate (optional; blind benchmark at a commit with known answers)
 sdive bench import <p> <corpus>... --name <set>
@@ -29,7 +33,7 @@ sdive todo <p>
 sdive run <p> [auto|sweep|dive|verify] [LENS] [--minutes M]
     (or interactively: /sdive-sweep, /sdive-dive, /sdive-verify, which use
      sdive next / brief / record / abandon)
-sdive coverage <p>
+sdive coverage <p> [--by-lens]
 sdive findings <p>
 
 # 4. Triage (interactive: proposes each decision, records what you approve)
@@ -50,7 +54,7 @@ sdive sync-status <p>
 
 ```mermaid
 flowchart TD
-    setup["Set up<br/>init · mirror · units"] --> bench
+    setup["Set up<br/>init · mirror · units<br/>rank (large projects)"] --> bench
     setup --> analyse
     bench["Calibrate (optional)<br/>bench import · /sdive-bench<br/>bench report · bench judge"] -->|tune lenses and agents| bench
     bench -->|carry verified findings| verify
@@ -118,6 +122,28 @@ revision the snapshot's `west.yml` pins.
 Never write to the user's own source checkouts; everything reads the mirror
 and snapshots.
 
+### Ranking (large projects)
+
+Zephyr's attack surfaces alone are ~30 times MCUboot's core, so the order in
+which work is handed out matters. Dive and sweep queues order units by a
+**score**: the area priority, plus a bonus (up to 1.5) for **signals** in the
+function's text (packet/PDU accessors, copies, length arithmetic, syscall
+verification, checks that exist only as `__ASSERT`, reference counting,
+handler-like names), computed at indexing; plus the **reach** the cheap
+`sdive-ranker` agent judged (0 not attacker-reachable … 3 parses attacker
+input directly: −2, −0.5, +0.5, +1.5); minus 1.5 for code no recorded build
+compiles, once builds are recorded (`sdive build`, to build). A dive takes
+the top-scored function's file; a sweep takes areas in order of their best
+unit.
+
+| Command | What it does |
+|---|---|
+| `/sdive-rank <p> [N\|all] [--parallel P] [--min-priority K]` | Hands batches of whole files (best-scored first, functions with no judgement yet) to `sdive-ranker` (a Sonnet subagent, blind like the others), records its judgements and rescores. Default `--min-priority 4`: rank where the deep work will go. |
+| `sdive rank show <p> [--top N] [--files] [--area A]` | The queue order: units (or files) by score, with reach and signals. |
+| `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. |
+| `sdive rank brief <p>` / `sdive rank record <id>` | What the skill runs: write a rank brief to staging (it leases its functions until recorded); validate and store a result (`sdive schema rank`). |
+| `sdive rank rescore <p>` | Recompute scores (`sdive units` also does). |
+
 ## 2. Calibrate (optional)
 
 A **blind benchmark round** runs the current lenses and agents at a commit
@@ -147,12 +173,21 @@ calls itself.
 
 **Kinds of run:**
 
-- **Sweep:** one focused lens (memory-safety, authenticity, recovery,
-  upgrade-state, rollback, secrets) over a few whole areas per run (an area
+- **Sweep:** one focused lens (MCUboot: memory-safety, authenticity,
+  recovery, upgrade-state, rollback, secrets; Zephyr: memory-safety,
+  syscall-boundary, protocol-state, lifetime, protocol-security) over a few
+  whole areas per run (an area
   too big for one run goes file by file), covering the uncovered in-scope
   code. Broad and cheap per line.
 - **Dive:** the holistic lens over the uncovered functions of the
-  highest-priority file. Deep.
+  highest-scored file. Deep.
+
+**Where a lens applies.** A lens may start with YAML frontmatter,
+`applies:` with `areas`, `paths` and `symbols` globs (a unit qualifies if
+any matches), `exclude_areas` and `min_priority`. Sweeps, `sdive todo` and
+coverage under that lens count only the units it applies to (a
+syscall-boundary sweep over Bluetooth is wasted work). No frontmatter: it
+applies everywhere (MCUboot's lenses).
 - **Verify:** one hypothesis (only the claim and its locations) given to a
   blind verifier that tries to refute it. Verdicts are verified, rejected,
   duplicate or inconclusive (back to hypothesis).
@@ -164,7 +199,7 @@ calls itself.
 | `/sdive-sweep <p> <lens\|all> [N\|all] [--minutes M]` | The sweep skill, run interactively. |
 | `/sdive-dive <p> [N\|all] [--minutes M]` | The dive skill. |
 | `/sdive-verify <p> [N\|all] [--minutes M]` | The verify skill. |
-| `sdive coverage <p>` | Per-area function coverage at the snapshot (current content hashes only: changed code loses its coverage). |
+| `sdive coverage <p> [--lens L] [--by-lens] [--min-priority K]` | Per-area function coverage at the snapshot (current content hashes only: changed code loses its coverage). `--lens` counts only where that lens applies; `--by-lens` gives the area × lens matrix of covered/applicable functions (holistic = dives). |
 | `sdive findings <p> [--status S]` | Lists findings. `sdive finding show <slug>` gives one, with locations and history, as JSON. |
 | `sdive upstream <p>` | Suspected defects noted in external (reference) components. |
 | `sdive runs <p>` | Recent runs. |

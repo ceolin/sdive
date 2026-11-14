@@ -216,6 +216,45 @@ MIGRATIONS: list[str] = [
         synced_at   TEXT NOT NULL
     );
     """,
+    # v7: ranking. Signals (JSON hit counts) and the queue score per unit
+    # version; which recorded builds compile each file; the ranker agent's
+    # reach judgements (latest per unit wins).
+    """
+    ALTER TABLE unit_versions ADD COLUMN signals TEXT;
+    ALTER TABLE unit_versions ADD COLUMN score REAL;
+
+    CREATE TABLE builds (
+        id           INTEGER PRIMARY KEY,
+        snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+        name         TEXT NOT NULL,
+        board        TEXT,
+        config       TEXT,   -- JSON: the build definition (overlay, extra args)
+        status       TEXT NOT NULL CHECK (status IN ('ok', 'failed')),
+        files        INTEGER,
+        log          TEXT,
+        built_at     TEXT NOT NULL,
+        UNIQUE (snapshot_id, name)
+    );
+
+    CREATE TABLE file_builds (
+        snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+        path         TEXT NOT NULL,
+        build_id     INTEGER NOT NULL REFERENCES builds(id),
+        PRIMARY KEY (snapshot_id, path, build_id)
+    );
+
+    CREATE TABLE unit_reach (
+        id           INTEGER PRIMARY KEY,
+        snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+        unit_id      INTEGER NOT NULL REFERENCES units(id),
+        reach        INTEGER NOT NULL CHECK (reach BETWEEN 0 AND 3),
+        attacker     TEXT,
+        reason       TEXT,
+        model        TEXT,
+        created_at   TEXT NOT NULL
+    );
+    CREATE INDEX unit_reach_lookup ON unit_reach(snapshot_id, unit_id);
+    """,
 ]
 
 

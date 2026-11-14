@@ -301,9 +301,29 @@ class ZepsecStatus(_Strict):
         return self
 
 
+class UnitReach(_Strict):
+    key: str = Field(description="Unit key exactly as given in the brief")
+    reach: int = Field(ge=0, le=3, description=(
+        "3: parses or acts on attacker-controlled input directly (packet, PDU, descriptor, "
+        "syscall argument) on a default or commonly enabled path; 2: reached by attacker "
+        "data indirectly or only behind a non-default option; 1: only with unusual "
+        "configuration, after authentication, or on derived/validated data; 0: not "
+        "attacker-reachable (init, trusted application API, shell, debug, platform glue)"))
+    attacker: str | None = Field(default=None, description="Attacker class, e.g. A1; None at 0")
+    reason: str = Field(max_length=200, description="One line: the input and how it arrives")
+
+
+class RankResult(_Strict):
+    """The sdive-ranker's reachability judgements for one rank brief."""
+
+    brief_id: str
+    model: str
+    units: list[UnitReach]
+
+
 SCHEMAS: dict[str, type[BaseModel]] = {
     "audit": AuditResult, "verify": VerifyResult, "writeup": WriteupResult,
-    "export": ExportDocument, "status": ZepsecStatus}
+    "rank": RankResult, "export": ExportDocument, "status": ZepsecStatus}
 
 # Contract files committed under schemas/ for zepsec to validate against.
 CONTRACT_FILES = {"export": "sdive-export-1.schema.json", "status": "zepsec-status-1.schema.json"}

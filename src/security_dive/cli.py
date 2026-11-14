@@ -17,7 +17,7 @@ from rich.table import Table
 from . import areas as areas_mod
 from . import bench as bench_mod
 from . import carry as carry_mod
-from . import launch, ledger, repo, triage, writeup
+from . import launch, ledger, rank, repo, triage, writeup
 from .config import MAIN_LEDGER, Config, ConfigError, Project, load_config
 from .db import connect
 from .schemas import CONTRACT_FILES, SCHEMAS, contract_schema
@@ -51,7 +51,7 @@ class Group(click.Group):
     def invoke(self, ctx: click.Context):
         try:
             return super().invoke(ctx)
-        except (ConfigError, ledger.LedgerError, repo.GitError) as e:
+        except (ConfigError, ledger.LedgerError, repo.GitError, rank.RankError) as e:
             raise click.ClickException(str(e)) from None
 
 
@@ -212,6 +212,120 @@ def lenses(c: Ctx, project: str) -> None:
         click.echo(f"no lenses in {p.lenses_dir}")
     for name in names:
         click.echo(f"{name:28} {ledger.file_hash(ledger.lens_path(p, name))}")
+
+
+# --- ranking ---------------------------------------------------------------
+
+
+@main.group("rank")
+def rank_grp() -> None:
+    """Queue order: signals, builds and the ranker agent's reach judgements."""
+
+
+@rank_grp.command("show")
+@click.argument("project")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@click.option("--top", default=30, show_default=True, help="How many rows.")
+@click.option("--files", "by_file", is_flag=True, help="Rank files (by best function).")
+@click.option("--area", help="Only this area.")
+@pass_ctx
+def rank_show(c: Ctx, project: str, rev: str | None, top: int, by_file: bool,
+              area: str | None) -> None:
+    """The top of the queue order: units (or files) by score."""
+    p = c.project(project)
+    sha, snap = _snapshot_for(c, p, rev)
+    rows = c.conn.execute(
+        """SELECT u.key, u.path, uv.area, uv.priority, uv.score, uv.signals,
+                  (SELECT reach FROM unit_reach r WHERE r.snapshot_id = uv.snapshot_id
+                   AND r.unit_id = uv.unit_id ORDER BY r.id DESC LIMIT 1) AS reach
+           FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
+           WHERE uv.snapshot_id = ? AND u.kind = 'function' AND (? IS NULL OR uv.area = ?)
+           ORDER BY uv.score DESC, u.path, uv.start_line""", (snap, area, area)).fetchall()
+    t = Table(title=f"{project} @ {sha[:12]} — queue order")
+    if by_file:
+        seen: dict[str, list] = {}
+        for r in rows:
+            seen.setdefault(r["path"], []).append(r)
+        for col in ("score", "file", "area", "functions"):
+            t.add_column(col, justify="right" if col in ("score", "functions") else "left")
+        for path, fns in list(seen.items())[:top]:
+            t.add_row(f"{fns[0]['score']:.2f}", path, fns[0]["area"], str(len(fns)))
+    else:
+        for col in ("score", "unit", "area", "reach", "signals"):
+            t.add_column(col, justify="right" if col in ("score", "reach") else "left")
+        for r in rows[:top]:
+            sig = json.loads(r["signals"] or "{}")
+            t.add_row(f"{r['score']:.2f}", r["key"], r["area"],
+                      "" if r["reach"] is None else str(r["reach"]),
+                      " ".join(f"{k}={v}" for k, v in sig.items()))
+    console.print(t)
+
+
+@rank_grp.command("status")
+@click.argument("project")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@pass_ctx
+def rank_status(c: Ctx, project: str, rev: str | None) -> None:
+    """Reach judgements recorded and left, per area priority."""
+    p = c.project(project)
+    sha, snap = _snapshot_for(c, p, rev)
+    rows = c.conn.execute(
+        """SELECT uv.priority, count(*) AS n,
+                  sum(EXISTS (SELECT 1 FROM unit_reach r WHERE r.snapshot_id = uv.snapshot_id
+                              AND r.unit_id = uv.unit_id)) AS judged
+           FROM unit_versions uv JOIN units u ON u.id = uv.unit_id
+           WHERE uv.snapshot_id = ? AND u.kind = 'function'
+           GROUP BY uv.priority ORDER BY uv.priority DESC""", (snap,)).fetchall()
+    builds = c.conn.execute("SELECT count(*) FROM builds WHERE snapshot_id = ? AND "
+                            "status = 'ok'", (snap,)).fetchone()[0]
+    t = Table(title=f"{project} @ {sha[:12]} — ranking")
+    for col in ("priority", "functions", "reach judged"):
+        t.add_column(col, justify="right")
+    for r in rows:
+        t.add_row(str(r["priority"]), str(r["n"]), str(r["judged"]))
+    console.print(t)
+    click.echo(f"recorded builds: {builds}" + ("" if builds else
+               " (scores ignore builds until one is recorded: `sdive build`)"))
+
+
+@rank_grp.command("brief")
+@click.argument("project")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@click.option("--max-functions", default=rank.RANK_MAX_FUNCTIONS, show_default=True)
+@click.option("--min-priority", default=0, help="Only areas at this priority or above.")
+@pass_ctx
+def rank_brief(c: Ctx, project: str, rev: str | None, max_functions: int,
+               min_priority: int) -> None:
+    """Write a brief for the sdive-ranker agent (best unranked files first) and
+    print it. Exits with status 3 when every function has a judgement."""
+    p = c.project(project)
+    _sha, snap = _snapshot_for(c, p, rev)
+    b = rank.write_brief(c.conn, c.cfg, p, snap, max_functions, min_priority)
+    if b is None:
+        click.echo("nothing to do", err=True)
+        sys.exit(EXIT_NOTHING_TO_DO)
+    _emit_json(b)
+
+
+@rank_grp.command("record")
+@click.argument("brief_id")
+@click.option("--file", "path", type=click.Path(exists=True, path_type=Path))
+@pass_ctx
+def rank_record(c: Ctx, brief_id: str, path: Path | None) -> None:
+    """Validate and store a ranker result, then rescore the snapshot."""
+    n = rank.record(c.conn, c.cfg, brief_id, path)
+    click.echo(f"recorded reach for {n} functions; rescored")
+
+
+@rank_grp.command("rescore")
+@click.argument("project")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@pass_ctx
+def rank_rescore(c: Ctx, project: str, rev: str | None) -> None:
+    """Recompute scores (after editing priorities, run `sdive units` instead)."""
+    p = c.project(project)
+    _sha, snap = _snapshot_for(c, p, rev)
+    click.echo(f"rescored {rank.rescore(c.conn, snap)} units")
 
 
 # --- the work loop ---------------------------------------------------------
@@ -482,21 +596,34 @@ def runs(c: Ctx, project: str, status: str | None, limit: int) -> None:
 @main.command()
 @click.argument("project")
 @click.option("--rev", help="Snapshot revision (default: the default branch).")
-@click.option("--lens", help="Only count coverage under this lens.")
+@click.option("--lens", help="Only count coverage under this lens (and where it applies).")
 @click.option("--any-version", is_flag=True, help="With --lens: count older lens versions too.")
+@click.option("--by-lens", is_flag=True,
+              help="Area x lens matrix: covered/applicable functions per current lens.")
+@click.option("--min-priority", type=int, default=0, help="Only areas at this priority or above.")
+@click.option("--json", "as_json", is_flag=True)
 @pass_ctx
-def coverage(c: Ctx, project: str, rev: str | None, lens: str | None, any_version: bool) -> None:
+def coverage(c: Ctx, project: str, rev: str | None, lens: str | None, any_version: bool,
+             by_lens: bool, min_priority: int, as_json: bool) -> None:
     """Per-area function coverage at a snapshot (current content hashes only)."""
     p = c.project(project)
     sha, snap = _snapshot_for(c, p, rev)
-    lens_ids = None
+    if by_lens:
+        _coverage_matrix(c, p, sha, snap, min_priority, as_json)
+        return
+    lens_ids = scope = None
     if lens:
         if any_version:
             lens_ids = [r[0] for r in c.conn.execute(
                 "SELECT id FROM lenses WHERE project = ? AND name = ?", (p.name, lens))]
         else:
             lens_ids = [ledger.register_lens(c.conn, p, lens)]
-    rows = ledger.coverage_by_area(c.conn, snap, lens_ids)
+        scope = ledger.lens_scope(p, lens)
+    rows = [r for r in ledger.coverage_by_area(c.conn, snap, lens_ids, scope)
+            if r["priority"] >= min_priority]
+    if as_json:
+        _emit_json(rows)
+        return
     t = Table(title=f"{project} @ {sha[:12]}" + (f" — lens {lens}" if lens else " — any lens"))
     for col in ("area", "prio", "functions", "lines", "swept", "dived"):
         t.add_column(col, justify="left" if col == "area" else "right")
@@ -511,6 +638,31 @@ def coverage(c: Ctx, project: str, rev: str | None, lens: str | None, any_versio
     t.add_row("total", "", str(tot["functions"]), str(tot["lines"]),
               pct(tot["swept"], tot["functions"]), pct(tot["dived"], tot["functions"]),
               style="bold")
+    console.print(t)
+
+
+def _coverage_matrix(c: Ctx, p: Project, sha: str, snap: int, min_priority: int,
+                     as_json: bool) -> None:
+    m = ledger.coverage_matrix(c.conn, p, snap)
+    rows = [a for a in m["areas"] if a["priority"] >= min_priority]
+    if as_json:
+        _emit_json({"lenses": m["lenses"], "areas": rows})
+        return
+    t = Table(title=f"{p.name} @ {sha[:12]} — covered/applicable functions by lens "
+                    "(holistic = dives)")
+    t.add_column("area")
+    t.add_column("prio", justify="right")
+    for n in m["lenses"]:
+        t.add_column(n, justify="right")
+    tot = {n: [0, 0] for n in m["lenses"]}
+    def cell(done: int, n: int) -> str:
+        return "-" if n == 0 else f"{done}/{n}"
+    for a in rows:
+        t.add_row(a["area"], str(a["priority"]), *(cell(*a["lenses"][n]) for n in m["lenses"]))
+        for n in m["lenses"]:
+            tot[n][0] += a["lenses"][n][0]
+            tot[n][1] += a["lenses"][n][1]
+    t.add_row("total", "", *(cell(*tot[n]) for n in m["lenses"]), style="bold")
     console.print(t)
 
 
