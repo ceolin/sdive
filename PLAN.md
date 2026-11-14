@@ -345,13 +345,23 @@ In order:
    (bus peers, BT host vs. controller, shell, samples) go to the Zephyr
    security team together with the build list below; agents apply the
    proposals until then. Keep finding references out of it, as for MCUboot.
-2. **Project definition** — `projects/zephyr/project.toml`: scope `kernel`,
-   `arch`, `soc`, `lib`, `subsys`, `drivers`, in-tree `modules/` glue;
-   exclude tests, samples, `subsys/testsuite`. Areas generated from
-   `MAINTAINERS.yml` (its `files:` globs; a generator command, to build),
-   with priorities set by hand on top. Reference trees from the snapshot's
-   `west.yml` rather than `.gitmodules` (Mbed TLS / TF-PSA-Crypto first, then
-   TF-M, OpenThread, HALs as needed).
+2. **Project definition** — built: `projects/zephyr/project.toml` scopes
+   `kernel`, `arch`, `soc`, `lib`, `subsys`, `drivers`, in-tree `modules/`
+   glue and `include/zephyr`, excluding tests, samples, `subsys/testsuite`,
+   debug/tracing, native_sim/bsim and emulators (11.2k files, 85.7k
+   functions, 3.7M lines at 2026-11 `main`; indexing takes ~40 s). Areas
+   are generated from `MAINTAINERS.yml` (`sdive areas zephyr --generate`,
+   428 entries; most specific pattern wins), with priorities set by hand
+   (`[[priority]]` rules over area names), hand-written overrides (shell
+   commands down to 1, `*_handlers.c` syscall handlers up to 4) and
+   `split` areas that subdivide the big generated ones (`networking`
+   137k lines, the Bluetooth areas, `usb`, LwM2M) into protocol-sized
+   pieces for dossiers and sweeps. Sweeps over an area larger than the
+   line budget take it file by file. Priority 5 holds ~530k lines of
+   functions, priority 4 ~480k, so ranking (step 4) orders the work within
+   them. Reference trees come from the snapshot's `west.yml` (`west =
+   "<name>"`, exported to `_west/<name>`): Mbed TLS, TF-PSA-Crypto and
+   zcbor so far; TF-M, OpenThread and hostap as needed.
 3. **Builds: what does some legitimate configuration compile** (`sdive
    build`, to build). There is no allyesconfig: arch/SoC/board and several
    stacks are Kconfig choices, most driver symbols are enabled by devicetree

@@ -305,7 +305,7 @@ def test_sweep_batches_whole_areas_and_estimate(cfg, indexed):
     # Leased targets drop out of the estimate, as they do from `next`.
     assert [r["areas"] for r in ledger.queue_estimate(conn, p, snap, "sweep", "memory")] == [
         ["misc"]]
-    # An area larger than the budget still goes whole.
+    # An area larger than the budget goes file by file, at least one file.
     run2 = ledger.next_unit_run(conn, p, snap, "sweep", "memory", max_lines=1)
     assert [t["key"] for t in ledger.brief(conn, cfg, run2)["targets"]] == ["src/util.c::helper"]
 

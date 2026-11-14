@@ -1,0 +1,462 @@
+# Zephyr analysis scope and areas. Paths are repo-relative; `**` spans
+# directories. Only .c/.h files are indexed.
+#
+# Areas come from MAINTAINERS.yml (`sdive areas zephyr --generate` writes
+# areas.toml; the most specific claim on a file wins). Hand-written
+# `[[areas]]` below are matched first and override them. Priorities are set
+# by `[[priority]]` rules over area names (first match wins), 5 = most
+# directly attacker-exposed; unmatched generated areas get default_priority.
+
+[runs]
+sweep_order = ["memory-safety", "syscall-boundary", "protocol-state", "lifetime", "protocol-security"]
+
+[scope]
+include = [
+    "kernel/**",
+    "arch/**",
+    "soc/**",
+    "lib/**",
+    "subsys/**",
+    "drivers/**",
+    "modules/**",
+    "include/zephyr/**",
+]
+exclude = [
+    "**/tests/**",
+    "**/test/**",
+    "**/samples/**",
+    "subsys/testsuite/**",
+    "subsys/debug/**",
+    "subsys/tracing/**",
+    "arch/posix/**",            # native_sim: a test host, not a product target
+    "**/*native_sim*",
+    "**/*bsim*",
+    "drivers/*/*_emul*.c",      # device emulators for tests
+    "drivers/*/emul_*.c",
+    "drivers/emul/**",
+    "include/zephyr/arch/posix/**",
+]
+default_area = { name = "misc", priority = 1, description = "In scope, not claimed by any MAINTAINERS.yml area." }
+
+[areas_source]
+file = "areas.toml"
+default_priority = 2
+
+# --- hand-written areas --------------------------------------------------
+#
+# Without `split`: matched before any generated area. With `split = "<area>"`:
+# subdivides that generated area where it is the winner (first matching split
+# wins); inherits its priority unless set.
+
+# Syscall verification handlers spread through drivers and subsystems
+# (`z_vrfy_*`): the user-mode boundary, whatever area owns the driver.
+[[areas]]
+name = "syscall-handlers"
+priority = 4
+description = "z_vrfy_* syscall handlers in drivers and subsystems (*_handlers.c)."
+globs = ["drivers/**/*_handlers.c", "subsys/**/*_handlers.c", "lib/**/*_handlers.c"]
+
+# Shell commands are a trusted administrative interface (threat model, Shell:
+# Open). The shell core and its remote back-ends stay in the generated `shell`.
+[[areas]]
+name = "shell-commands"
+priority = 1
+description = "Shell command handlers inside stacks and drivers (trusted interface)."
+globs = ["**/shell/**", "**/*_shell.c", "**/*_shell.h", "**/shell_*.c", "**/*shell.c"]
+exclude = ["subsys/shell/**", "include/zephyr/shell/**"]
+
+# Networking (generated `networking` holds ~137k lines).
+[[areas]]
+name = "net-tcp"
+split = "networking"
+description = "TCP: segment parsing, connection state machine, retransmission, windows."
+globs = ["subsys/net/ip/tcp*.[ch]"]
+
+[[areas]]
+name = "net-ipv6"
+split = "networking"
+description = "IPv6, ICMPv6, neighbour discovery, MLD, fragmentation, 6LoWPAN, routing."
+globs = ["subsys/net/ip/ipv6*.[ch]", "subsys/net/ip/icmpv6.[ch]", "subsys/net/ip/6lo*.[ch]",
+         "subsys/net/ip/route_ipv6.c", "subsys/net/ip/nbr.[ch]", "subsys/net/ip/dplpmtud.c",
+         "subsys/net/ip/pmtu.[ch]"]
+
+[[areas]]
+name = "net-ipv4"
+split = "networking"
+description = "IPv4, ICMPv4, IGMP, fragmentation, NAT, ACD, autoconf, routing."
+globs = ["subsys/net/ip/ipv4*.[ch]", "subsys/net/ip/icmpv4.[ch]", "subsys/net/ip/igmp.c",
+         "subsys/net/ip/route_ipv4.c", "subsys/net/ip/icmp.c"]
+
+[[areas]]
+name = "net-core"
+split = "networking"
+description = "IP core: net_pkt, net_buf helpers, interfaces, contexts, UDP, connection demux."
+globs = ["subsys/net/ip/**", "subsys/net/pkt_filter/**", "subsys/net/*.c"]
+
+[[areas]]
+name = "net-dns"
+split = "networking"
+description = "DNS resolver, mDNS/LLMNR responders, DNS-SD."
+globs = ["subsys/net/lib/dns/**"]
+
+[[areas]]
+name = "net-quic"
+split = "networking"
+description = "QUIC (experimental)."
+globs = ["subsys/net/lib/quic/**"]
+
+[[areas]]
+name = "net-ssh"
+split = "networking"
+description = "SSH."
+globs = ["subsys/net/lib/ssh/**"]
+
+[[areas]]
+name = "net-wireguard"
+split = "networking"
+description = "WireGuard VPN."
+globs = ["subsys/net/lib/wireguard/**"]
+
+[[areas]]
+name = "net-dhcpv6"
+split = "networking"
+description = "DHCPv6 client and server."
+globs = ["subsys/net/lib/dhcpv6/**"]
+
+[[areas]]
+name = "net-ppp"
+split = "networking"
+description = "PPP: LCP/IPCP/IPv6CP state machines, PAP, options parsing."
+globs = ["subsys/net/l2/ppp/**"]
+
+[[areas]]
+name = "net-lib"
+split = "networking"
+priority = 4
+description = "Other network libraries (RTP, STUN, websocket, FTP, TFTP, SNTP, SOCKS, ...)."
+globs = ["subsys/net/lib/**"]
+
+[[areas]]
+name = "net-headers"
+split = "networking"
+priority = 4
+description = "Networking public headers (inline helpers)."
+globs = ["include/zephyr/net/**"]
+
+# Bluetooth host.
+[[areas]]
+name = "bt-smp"
+split = "bluetooth-host"
+description = "Security Manager: pairing, key distribution, ECC, key storage."
+globs = ["subsys/bluetooth/host/smp*.[ch]", "subsys/bluetooth/host/ecc*.[ch]",
+         "subsys/bluetooth/host/keys*.[ch]", "subsys/bluetooth/host/crypto*.[ch]"]
+
+[[areas]]
+name = "bt-att-gatt"
+split = "bluetooth-host"
+description = "ATT and GATT client/server."
+globs = ["subsys/bluetooth/host/att*.[ch]", "subsys/bluetooth/host/gatt*.[ch]"]
+
+[[areas]]
+name = "bt-l2cap"
+split = "bluetooth-host"
+description = "L2CAP LE: signalling, credit-based channels, segmentation."
+globs = ["subsys/bluetooth/host/l2cap*.[ch]"]
+
+[[areas]]
+name = "bt-hci-host"
+split = "bluetooth-host"
+description = "HCI event and ACL handling, connections, buffers."
+globs = ["subsys/bluetooth/host/hci_*.[ch]", "subsys/bluetooth/host/conn*.[ch]",
+         "subsys/bluetooth/host/buf*.[ch]", "subsys/bluetooth/host/iso*.[ch]"]
+
+[[areas]]
+name = "bt-gap"
+split = "bluetooth-host"
+description = "Advertising, scanning, periodic sync, identity/privacy, direction finding, CS."
+globs = ["subsys/bluetooth/host/adv*.[ch]", "subsys/bluetooth/host/scan*.[ch]",
+         "subsys/bluetooth/host/id*.[ch]", "subsys/bluetooth/host/direction*.[ch]",
+         "subsys/bluetooth/host/cs*.[ch]", "subsys/bluetooth/host/addr*.[ch]"]
+
+[[areas]]
+name = "bt-services"
+split = "bluetooth-host"
+priority = 4
+description = "GATT services (OTS, HIDS, BAS, DIS, ...)."
+globs = ["subsys/bluetooth/services/**"]
+
+# Bluetooth Classic (host/classic).
+[[areas]]
+name = "bt-classic-l2cap"
+split = "bluetooth-classic"
+description = "BR/EDR L2CAP, connections, SSP, keys."
+globs = ["subsys/bluetooth/host/classic/l2cap_br*", "subsys/bluetooth/host/classic/conn_br*",
+         "subsys/bluetooth/host/classic/ssp*", "subsys/bluetooth/host/classic/keys_br*",
+         "subsys/bluetooth/host/classic/sco*"]
+
+[[areas]]
+name = "bt-classic-rfcomm-sdp"
+split = "bluetooth-classic"
+description = "RFCOMM and SDP."
+globs = ["subsys/bluetooth/host/classic/rfcomm*", "subsys/bluetooth/host/classic/sdp*",
+         "subsys/bluetooth/host/classic/did*"]
+
+[[areas]]
+name = "bt-classic-av"
+split = "bluetooth-classic"
+description = "A2DP, AVDTP, AVCTP, AVRCP (and cover art)."
+globs = ["subsys/bluetooth/host/classic/a2dp*", "subsys/bluetooth/host/classic/av*"]
+
+[[areas]]
+name = "bt-classic-hfp"
+split = "bluetooth-classic"
+description = "Hands-free profile (AG and HF) and its AT parser."
+globs = ["subsys/bluetooth/host/classic/hfp*", "subsys/bluetooth/host/classic/at.[ch]"]
+
+[[areas]]
+name = "bt-classic-obex"
+split = "bluetooth-classic"
+description = "OBEX, GOEP and the object profiles (FTP, MAP, PBAP, OPP, BIP)."
+globs = ["subsys/bluetooth/host/classic/obex*", "subsys/bluetooth/host/classic/goep*",
+         "subsys/bluetooth/host/classic/ftp*", "subsys/bluetooth/host/classic/map*",
+         "subsys/bluetooth/host/classic/pbap*", "subsys/bluetooth/host/classic/opp*",
+         "subsys/bluetooth/host/classic/bip*"]
+
+[[areas]]
+name = "bt-classic-hid"
+split = "bluetooth-classic"
+description = "HID host and device over BR/EDR."
+globs = ["subsys/bluetooth/host/classic/hid*"]
+
+[[areas]]
+name = "bt-common"
+split = "bluetooth-classic"
+priority = 3
+description = "Bluetooth common helpers (HCI lockstep, RPA, strings)."
+globs = ["subsys/bluetooth/common/**"]
+
+# Bluetooth controller (Zephyr's link layer).
+[[areas]]
+name = "bt-ll-hci"
+split = "bluetooth-controller"
+description = "Controller HCI command/event handling (fed by the host: A3 if separate chip)."
+globs = ["subsys/bluetooth/controller/hci/**"]
+
+[[areas]]
+name = "bt-ll-llcp"
+split = "bluetooth-controller"
+description = "LL control procedures: PDUs from the peer, procedure state machines."
+globs = ["subsys/bluetooth/controller/ll_sw/ull_llcp*", "subsys/bluetooth/controller/ll_sw/ull_conn*",
+         "subsys/bluetooth/controller/ll_sw/ull_central.c",
+         "subsys/bluetooth/controller/ll_sw/ull_peripheral.c",
+         "subsys/bluetooth/controller/ll_sw/ull_tx_queue.c"]
+
+[[areas]]
+name = "bt-ll-iso"
+split = "bluetooth-controller"
+description = "ISO: CIS/BIS, ISOAL segmentation and reassembly."
+globs = ["subsys/bluetooth/controller/ll_sw/*iso*", "subsys/bluetooth/controller/ll_sw/nordic/lll/*iso*"]
+
+[[areas]]
+name = "bt-ll-adv-scan"
+split = "bluetooth-controller"
+description = "Advertising, scanning, extended/periodic advertising, sync, filters, DF."
+globs = ["subsys/bluetooth/controller/ll_sw/ull_adv*", "subsys/bluetooth/controller/ll_sw/ull_scan*",
+         "subsys/bluetooth/controller/ll_sw/ull_sync*", "subsys/bluetooth/controller/ll_sw/ull_filter*",
+         "subsys/bluetooth/controller/ll_sw/ull_df*"]
+
+[[areas]]
+name = "bt-ll-lll"
+split = "bluetooth-controller"
+description = "Lower link layer (radio events, PDU reception) for Nordic."
+globs = ["subsys/bluetooth/controller/ll_sw/nordic/lll/**"]
+
+[[areas]]
+name = "bt-ll-hal"
+split = "bluetooth-controller"
+priority = 2
+description = "Radio, ticker and platform HAL; OpenISA port."
+globs = ["subsys/bluetooth/controller/ll_sw/nordic/**", "subsys/bluetooth/controller/ll_sw/openisa/**",
+         "subsys/bluetooth/controller/ticker/**", "subsys/bluetooth/controller/coex/**",
+         "subsys/bluetooth/controller/flash/**"]
+
+# Bluetooth LE Audio: split by profile family.
+[[areas]]
+name = "bt-audio-bap"
+split = "bluetooth-audio"
+description = "BAP (unicast, broadcast, scan delegator, assistant), ASCS, PACS, codec config."
+globs = ["subsys/bluetooth/audio/bap*", "subsys/bluetooth/audio/ascs*",
+         "subsys/bluetooth/audio/pacs*", "subsys/bluetooth/audio/codec*",
+         "subsys/bluetooth/audio/audio.c"]
+
+[[areas]]
+name = "bt-audio-media-call"
+split = "bluetooth-audio"
+description = "Media control (MCS/MCC/MCP), telephony (TBS, CCP)."
+globs = ["subsys/bluetooth/audio/mc*", "subsys/bluetooth/audio/tbs*",
+         "subsys/bluetooth/audio/ccp*", "subsys/bluetooth/audio/ccid*"]
+
+[[areas]]
+name = "bt-audio-rendering"
+split = "bluetooth-audio"
+description = "Volume, microphone, input control (VCP, VOCS, AICS, MICP), HAS, CSIP."
+globs = ["subsys/bluetooth/audio/vcp*", "subsys/bluetooth/audio/vocs*",
+         "subsys/bluetooth/audio/aics*", "subsys/bluetooth/audio/micp*",
+         "subsys/bluetooth/audio/has*", "subsys/bluetooth/audio/csip*"]
+
+# Bluetooth Mesh.
+[[areas]]
+name = "bt-mesh-net"
+split = "bluetooth-mesh"
+description = "Mesh network/transport layers, SAR, friend/LPN, replay protection, crypto."
+globs = ["subsys/bluetooth/mesh/net.[ch]", "subsys/bluetooth/mesh/transport*",
+         "subsys/bluetooth/mesh/friend*", "subsys/bluetooth/mesh/lpn*",
+         "subsys/bluetooth/mesh/rpl*", "subsys/bluetooth/mesh/crypto*",
+         "subsys/bluetooth/mesh/subnet*", "subsys/bluetooth/mesh/app_keys*",
+         "subsys/bluetooth/mesh/va*", "subsys/bluetooth/mesh/msg*"]
+
+[[areas]]
+name = "bt-mesh-prov"
+split = "bluetooth-mesh"
+description = "Provisioning (PB-ADV, PB-GATT, provisionee, provisioner, remote provisioning)."
+globs = ["subsys/bluetooth/mesh/prov*", "subsys/bluetooth/mesh/pb_*",
+         "subsys/bluetooth/mesh/rpr*"]
+
+[[areas]]
+name = "bt-mesh-bearer"
+split = "bluetooth-mesh"
+description = "Advertising and GATT proxy bearers, beacons, solicitation."
+globs = ["subsys/bluetooth/mesh/adv*", "subsys/bluetooth/mesh/proxy*",
+         "subsys/bluetooth/mesh/beacon*", "subsys/bluetooth/mesh/gatt*",
+         "subsys/bluetooth/mesh/sol*", "subsys/bluetooth/mesh/priv_beacon*",
+         "subsys/bluetooth/mesh/od_priv_proxy*"]
+
+[[areas]]
+name = "bt-mesh-dfu"
+split = "bluetooth-mesh"
+description = "BLOB transfer and device firmware update models."
+globs = ["subsys/bluetooth/mesh/blob*", "subsys/bluetooth/mesh/dfu*",
+         "subsys/bluetooth/mesh/dfd*"]
+
+# USB.
+[[areas]]
+name = "usb-device-classes"
+split = "usb"
+description = "USB device class implementations (device_next and legacy): requests from the host."
+globs = ["subsys/usb/device_next/class/**", "subsys/usb/device/class/**"]
+
+[[areas]]
+name = "usb-device-core"
+split = "usb"
+description = "USB device stack core: control transfers, descriptors, configuration."
+globs = ["subsys/usb/device_next/**", "subsys/usb/device/**", "subsys/usb/common/**"]
+
+[[areas]]
+name = "usb-host"
+split = "usb"
+description = "USB host stack: descriptors and data from attached devices."
+globs = ["subsys/usb/host/**"]
+
+[[areas]]
+name = "usb-controller-drivers"
+split = "usb"
+priority = 4
+description = "USB device/host controller drivers (UDC, UHC, legacy), BC1.2."
+globs = ["drivers/usb/**"]
+
+# LwM2M.
+[[areas]]
+name = "lwm2m-formats"
+split = "networking-lwm2m"
+description = "LwM2M content formats: TLV, JSON, SenML JSON/CBOR, CBOR, plain text, link format."
+globs = ["subsys/net/lib/lwm2m/lwm2m_rw_*", "subsys/net/lib/lwm2m/lwm2m_senml_*",
+         "subsys/net/lib/lwm2m/buf_util.h"]
+
+[[areas]]
+name = "lwm2m-engine"
+split = "networking-lwm2m"
+description = "LwM2M engine, message handling, registry, observation, RD client."
+globs = ["subsys/net/lib/lwm2m/lwm2m_engine*", "subsys/net/lib/lwm2m/lwm2m_message*",
+         "subsys/net/lib/lwm2m/lwm2m_registry*", "subsys/net/lib/lwm2m/lwm2m_observation*",
+         "subsys/net/lib/lwm2m/lwm2m_rd_client*", "subsys/net/lib/lwm2m/lwm2m_pull*",
+         "subsys/net/lib/lwm2m/lwm2m_util*"]
+
+[[areas]]
+name = "lwm2m-objects"
+split = "networking-lwm2m"
+priority = 4
+description = "LwM2M and IPSO object implementations."
+globs = ["subsys/net/lib/lwm2m/**"]
+
+# --- priorities (by area name; globs allowed) -----------------------------
+
+# Network-, radio- and bus-facing parsers and protocol state machines.
+[[priority]]
+priority = 5
+areas = [
+    "networking", "networking-bsd-sockets", "networking-coap", "networking-dhcpv4",
+    "networking-http", "networking-lwm2m", "networking-mqtt", "networking-mqtt-sn",
+    "networking-native-ieee-802-15-4", "networking-ethernet", "networking-gptp",
+    "networking-ptp", "networking-wi-fi", "networking-ocpp", "networking-mcp", "networking-dsa",
+    "bluetooth-host", "bluetooth-controller", "bluetooth-mesh", "bluetooth-audio",
+    "bluetooth-classic", "bluetooth-iso",
+    "usb", "usb-c", "authentication-fido2",
+    "userspace",
+    "mcu-manager", "osdp", "hawkbit", "mgmt-updatehub", "mgmt-fota-http",
+    "west-project-hostap", "west-project-uoscore-uedhoc",
+]
+
+# Kernel and arch (syscall boundary, MPU/MMU, TrustZone), other stacks and
+# glue an attacker's data reaches, storage that may be removable, crypto and
+# randomness glue.
+[[priority]]
+priority = 4
+areas = [
+    "kernel", "arm-arch", "arm64-arch", "riscv-arch", "x86-arch", "xtensa-arch", "arc-arch",
+    "memory-management", "demand-paging", "heap-management", "linkable-loadable-extensions",
+    "rtio", "device-driver-model",
+    "networking-*", "bluetooth*", "drivers-can", "modbus", "lora*",
+    "filesystems", "little-fs", "vfs", "disk", "storage", "storage-zms", "settings",
+    "key-value-storage-systems", "dfu", "retention", "nvmem",
+    "modem", "drivers-modem", "ipc", "open-amp", "zbus", "pmci",
+    "drivers-ethernet", "drivers-wi-fi*", "drivers-ieee-802-15-4", "drivers-i3c",
+    "drivers-entropy", "drivers-crypto", "random", "secure-storage", "security",
+    "authentication", "json-web-token",
+    "west-project-mbedtls", "west-project-tf-psa-crypto*", "west-project-trusted-firmware-m",
+    "west-project-openthread", "west-project-zcbor", "west-project-nanopb",
+    "west-project-mcuboot", "west-project-nrf-wifi", "west-project-fatfs",
+    "west-project-littlefs", "west-project-libmctp", "west-project-open-amp",
+    "ec-host-commands", "shell", "console", "c-library", "posix-api-layer", "cmsis-api-layer",
+    "base-os", "utilities", "logging", "input", "sensor-subsystem",
+]
+
+# Remaining generated areas (mostly drivers) default to 2.
+
+# Board, SoC and vendor platform glue: trusted configuration code.
+[[priority]]
+priority = 1
+areas = ["*-platforms", "*-platform", "*-platforms-*", "*-platform-*", "boards-socs",
+         "board-soc-configuration", "shields", "nrf-bsim", "native-sim-and-posix-arch",
+         "west-project-hal-*", "west-project-babblesim*", "west-project-bsim",
+         "west-project-nrf-hw-models", "emulation", "benchmarks", "samples", "tests",
+         "test-framework-ztest", "testing*", "debug*", "tracing", "instrumentation-subsystem"]
+
+# Reference trees: external west modules exported into snapshots under
+# `_west/<name>`, at the revision the snapshot's west.yml pins, so agents can
+# establish API contracts. Never indexed or audited; defects found in them
+# become upstream notes. The user's west workspace is used only as --reference.
+
+[[reference]]
+west = "mbedtls"
+role = "Mbed TLS 4.x: TLS/X.509 layer used by Zephyr's sockets and credentials"
+export = ["include", "library"]
+
+[[reference]]
+west = "tf-psa-crypto"
+role = "TF-PSA-Crypto: PSA Crypto API and builtin drivers (Mbed TLS 4.x crypto)"
+export = ["include", "core", "drivers", "extras", "platform", "utilities"]
+
+[[reference]]
+west = "zcbor"
+role = "zcbor: CBOR encoder/decoder used by mcumgr, LwM2M and others"
+export = ["include", "src"]

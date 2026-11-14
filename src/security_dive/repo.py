@@ -228,6 +228,61 @@ def _export_references(
                                full + "/", tree, out, absent)
 
 
+# --- west projects ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WestProject:
+    name: str
+    path: str
+    url: str
+    revision: str
+
+
+def west_projects(git_dir: Path, sha: str) -> dict[str, WestProject]:
+    """Projects in `west.yml` at `sha` (imports are not followed), by name."""
+    import yaml
+
+    try:
+        text = git("-C", git_dir, "show", f"{sha}:west.yml")
+    except GitError:
+        return {}
+    manifest = (yaml.safe_load(text) or {}).get("manifest", {})
+    remotes = {r["name"]: r["url-base"].rstrip("/") for r in manifest.get("remotes", [])}
+    defaults = manifest.get("defaults", {})
+    out = {}
+    for p in manifest.get("projects", []):
+        url = p.get("url")
+        if url is None:
+            base = remotes.get(p.get("remote", defaults.get("remote", "")))
+            if base is None:
+                continue
+            url = f"{base}/{p.get('repo-path', p['name'])}"
+        out[p["name"]] = WestProject(p["name"], p.get("path", p["name"]), url,
+                                     str(p.get("revision", defaults.get("revision", "master"))))
+    return out
+
+
+def _export_west_references(
+    cfg: Config, project: Project, refs: list[Reference], mirror: Path, sha: str,
+    tree: Path, out: list[dict], absent: list[str],
+) -> None:
+    projects = west_projects(mirror, sha)
+    # The user's west workspace (parent of the zephyr checkout) as --reference only.
+    workspace = project.reference_repo.parent if project.reference_repo else None
+    for ref in refs:
+        wp = projects.get(ref.west or "")
+        if wp is None:
+            absent.append(ref.path)
+            continue
+        local = workspace / wp.path if workspace is not None else None
+        sub = ensure_submodule_mirror(cfg, project, wp.url, wp.revision, local)
+        rev = git("-C", sub, "rev-parse", f"{wp.revision}^{{commit}}")
+        _export(sub, rev, tree / ref.path, ref.export)
+        out.append({"path": ref.path, "name": wp.name, "url": wp.url, "sha": rev,
+                    "role": ref.role, "export": list(ref.export), "west_path": wp.path})
+
+
 def _layout(project: Project) -> str:
     """Fingerprint of everything besides the commit that shapes a snapshot."""
     spec = json.dumps([r.as_dict() for r in project.references], sort_keys=True)
@@ -265,8 +320,11 @@ def snapshot(cfg: Config, project: Project, sha: str) -> Path:
         _export(mirror, sha, tmp)
         refs: list[dict] = []
         absent: list[str] = []
-        _export_references(cfg, project, project.references, mirror, sha, project.upstream,
+        subs = tuple(r for r in project.references if r.west is None)
+        _export_references(cfg, project, subs, mirror, sha, project.upstream,
                            _git_dir_of(project.reference_repo), "", tmp, refs, absent)
+        _export_west_references(cfg, project, [r for r in project.references if r.west],
+                                mirror, sha, tmp, refs, absent)
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
         raise

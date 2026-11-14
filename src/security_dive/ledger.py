@@ -224,6 +224,24 @@ def _batch(rows: list, kind: str, max_units: int, max_lines: int | None) -> list
         n = sum(size(r) for r in members)
         if batch and lines + n > limit:
             break
+        if not batch and n > limit:
+            return _files_of(members, limit)
+        batch.extend(members)
+        lines += n
+    return batch
+
+
+def _files_of(rows: list, limit: int) -> list:
+    """An area too big for one sweep (Zephyr's are): whole files of it, in
+    queue order, up to `limit` lines (at least one file)."""
+    files: dict[str, list] = {}
+    for r in rows:
+        files.setdefault(r["path"], []).append(r)
+    batch, lines = [], 0
+    for members in files.values():
+        n = sum(r["end_line"] - r["start_line"] + 1 for r in members)
+        if batch and lines + n > limit:
+            break
         batch.extend(members)
         lines += n
     return batch

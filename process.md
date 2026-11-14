@@ -93,12 +93,27 @@ flowchart TD
 | `sdive init` | Creates `analysis/` (private, its own nested git repo, never published) and `work/` (disposable), and the main ledger `analysis/sdive.db`. |
 | `sdive mirror <p>` | Creates or fetches the project's bare mirror in `work/mirrors/`, using the user's checkout only as a `--reference`. Fetches branches and tags. Run it again before analysing new commits or scoping against a new release. |
 | `sdive units <p> [REV]` | Exports a read-only snapshot of REV (default: the default branch) to `work/snapshots/<p>/<sha>/` and indexes its files and functions by area (tree-sitter). `sdive snapshot` only exports. |
+| `sdive areas <p> [--generate REV]` | Lists the project's areas with priority and source (hand-written, generated, default). `--generate` rewrites the generated areas file from the project's `MAINTAINERS.yml` at REV (Zephyr); priorities stay in `project.toml`, so regenerating loses no decisions. Re-run `sdive units` afterwards. |
 | `sdive lenses <p>` | Lists lenses and their content hashes. Editing a lens makes a new version, and coverage under the old version no longer counts for it. |
 
 Per-project configuration: `config.toml` (repos, paths, threat model) and
 `projects/<p>/project.toml` (scope globs, areas and their priorities,
 reference trees, `sweep_order`). Lenses live in `projects/<p>/lenses/`. The
 agents' threat model is `projects/<p>/threat-model.md`.
+
+**Areas.** MCUboot's are hand-written and matched in order. Zephyr's come
+from `MAINTAINERS.yml` (`[areas_source]`, generated into
+`projects/zephyr/areas.toml`): where entries overlap, the most specific
+pattern wins (an exact file, then the longest literal prefix). On top of
+them, `project.toml` holds `[[priority]]` rules (area-name globs, first
+match wins) and hand-written `[[areas]]`: without `split` they are matched
+before any generated area (e.g. shell commands, syscall handlers); with
+`split = "<area>"` they subdivide a large generated area where it is the
+winner, inheriting its priority unless they set one.
+
+**Reference trees** are either submodules (`path`, MCUboot) or west
+projects (`west = "<name>"`, Zephyr), exported to `_west/<name>` at the
+revision the snapshot's `west.yml` pins.
 
 Never write to the user's own source checkouts; everything reads the mirror
 and snapshots.
@@ -133,8 +148,9 @@ calls itself.
 **Kinds of run:**
 
 - **Sweep:** one focused lens (memory-safety, authenticity, recovery,
-  upgrade-state, rollback, secrets) over a few whole areas per run, covering
-  the uncovered in-scope code. Broad and cheap per line.
+  upgrade-state, rollback, secrets) over a few whole areas per run (an area
+  too big for one run goes file by file), covering the uncovered in-scope
+  code. Broad and cheap per line.
 - **Dive:** the holistic lens over the uncovered functions of the
   highest-priority file. Deep.
 - **Verify:** one hypothesis (only the claim and its locations) given to a

@@ -73,8 +73,9 @@ instructions.
 
 - Python via `uv` only (`uv run`, `uv add`); never pip.
 - Tests: `uv run pytest`. Lint: `uvx ruff check src tests`.
-- Module map: `config.py` (config + project scope/areas), `repo.py` (mirror,
-  snapshots), `units.py` (tree-sitter extraction), `db.py` (schema, append-only
+- Module map: `config.py` (config + project scope/areas), `areas.py` (areas
+  generated from MAINTAINERS.yml), `repo.py` (mirror, snapshots, west.yml
+  references), `units.py` (tree-sitter extraction), `db.py` (schema, append-only
   migrations), `schemas.py` (agent result models, hand-off contracts),
   `ledger.py` (queue, record, briefs, reports), `bench.py` (ground truth,
   scoring), `carry.py` (findings across ledgers), `triage.py` (clusters,

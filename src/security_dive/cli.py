@@ -14,6 +14,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from . import areas as areas_mod
 from . import bench as bench_mod
 from . import carry as carry_mod
 from . import launch, ledger, repo, triage, writeup
@@ -110,7 +111,7 @@ def projects(c: Ctx) -> None:
     """List configured projects."""
     for name, p in c.cfg.projects.items():
         scope = "scope defined" if p.include else "no scope yet"
-        click.echo(f"{name:10} {p.github:28} {len(p.areas):2} areas, {scope}")
+        click.echo(f"{name:10} {p.github:28} {len(p.all_areas):3} areas, {scope}")
 
 
 @main.command()
@@ -176,6 +177,27 @@ def units(c: Ctx, project: str, rev: str | None, show: bool) -> None:
         t.add_row(area, str(prio), str(files), str(funcs), str(lines))
     totals = (str(sum(s[i] for s in stats.values())) for i in (1, 2, 3))
     t.add_row("total", "", *totals, style="bold")
+    console.print(t)
+
+
+@main.command()
+@click.argument("project")
+@click.option("--generate", "gen_rev", metavar="REV", default=None,
+              help="Regenerate the areas file from MAINTAINERS.yml at REV ('main', a SHA).")
+@pass_ctx
+def areas(c: Ctx, project: str, gen_rev: str | None) -> None:
+    """List the project's areas and priorities, or regenerate the generated ones."""
+    p = c.project(project)
+    if gen_rev is not None:
+        sha = repo.resolve(c.cfg, p, gen_rev)
+        click.echo(f"wrote {areas_mod.generate(c.cfg, p, sha)} at {sha[:12]}")
+        p = load_config().project(project)
+    t = Table(title=f"{project} areas")
+    for col in ("area", "prio", "source", "description"):
+        t.add_column(col, justify="right" if col == "prio" else "left")
+    for a in sorted((*p.all_areas, p.default_area), key=lambda a: (-a.priority, a.name)):
+        src = "generated" if a.generated else ("default" if a is p.default_area else "hand")
+        t.add_row(a.name, str(a.priority), src, a.description)
     console.print(t)
 
 
