@@ -146,6 +146,25 @@ def unranked(conn: sqlite3.Connection, snap: int, min_priority: int = 0) -> list
            ORDER BY uv.score DESC, u.path, uv.start_line""", (snap, min_priority)).fetchall()
 
 
+def batches(rows: list[sqlite3.Row], max_functions: int = RANK_MAX_FUNCTIONS):
+    """Group unranked function rows (best first) into briefs: whole files, in
+    order of their best function, up to `max_functions` per brief (a larger
+    file gets a brief of its own). Yields lists of (path, rows)."""
+    files: dict[str, list] = {}
+    for r in rows:
+        files.setdefault(r["path"], []).append(r)
+    batch: list = []
+    n = 0
+    for path, fns in files.items():
+        if batch and n + len(fns) > max_functions:
+            yield batch
+            batch, n = [], 0
+        batch.append((path, fns))
+        n += len(fns)
+    if batch:
+        yield batch
+
+
 def write_brief(conn: sqlite3.Connection, cfg: Config, project: Project, snap: int,
                 max_functions: int = RANK_MAX_FUNCTIONS, min_priority: int = 0) -> dict | None:
     """A rank brief for the best unranked files (whole files, by their best
@@ -154,19 +173,11 @@ def write_brief(conn: sqlite3.Connection, cfg: Config, project: Project, snap: i
     rows = [r for r in unranked(conn, snap, min_priority) if r["key"] not in leased]
     if not rows:
         return None
-    files: dict[str, list] = {}
-    for r in rows:
-        files.setdefault(r["path"], []).append(r)
-    batch, n = [], 0
-    for path, fns in files.items():
-        if batch and n + len(fns) > max_functions:
-            break
-        fns = sorted(fns, key=lambda r: r["start_line"])
-        batch.append({"path": path, "area": fns[0]["area"], "functions": [
-            {"key": r["key"], "symbol": r["symbol"], "start_line": r["start_line"],
-             "end_line": r["end_line"], "signals": json.loads(r["signals"] or "{}")}
-            for r in fns]})
-        n += len(fns)
+    batch = [{"path": path, "area": fns[0]["area"], "functions": [
+        {"key": r["key"], "symbol": r["symbol"], "start_line": r["start_line"],
+         "end_line": r["end_line"], "signals": json.loads(r["signals"] or "{}")}
+        for r in sorted(fns, key=lambda r: r["start_line"])]}
+        for path, fns in next(batches(rows, max_functions))]
     sha = conn.execute("SELECT sha FROM snapshots WHERE id = ?", (snap,)).fetchone()[0]
     brief_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
     staging = cfg.staging
@@ -218,7 +229,13 @@ def record(conn: sqlite3.Connection, cfg: Config, brief_id: str,
     ids = {r["key"]: r["id"] for r in conn.execute(
         "SELECT id, key FROM units WHERE project = ?", (b["project"],))}
     ts = datetime.now(UTC).isoformat(timespec="seconds")
+    created = datetime.strptime(brief_id, "%Y%m%dT%H%M%S%f").replace(tzinfo=UTC)
     with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO rank_briefs (brief_id, project, snapshot_id, functions, "
+            "created_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (brief_id, b["project"], snap, len(wanted), created.isoformat(),
+             datetime.now(UTC).isoformat()))
         conn.executemany(
             "INSERT INTO unit_reach (snapshot_id, unit_id, reach, attacker, reason, model, "
             "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

@@ -63,3 +63,15 @@ def test_rank_brief_record_rescore(cfg, indexed):  # noqa: F811
     assert scores["src/parser.c::check_len"] == 5 - 2.0
     assert scores["src/parser.c::parse"] == pytest.approx(5 + 0.2 + 1.5)
     assert rank.unranked(conn, snap)[0]["key"] == "src/util.c::helper"
+    # The recorded brief is timed for `sdive todo`.
+    from security_dive import ledger
+    assert conn.execute("SELECT functions FROM rank_briefs").fetchone()[0] == 3
+    assert ledger.run_minutes([conn], p.name)["rank"][1] == 1
+
+
+def test_batches_whole_files():
+    rows = [{"path": p} for p in ["a", "a", "b", "c", "c", "c", "d"]]
+    out = [[(path, len(fns)) for path, fns in b] for b in rank.batches(rows, 3)]
+    # A file never splits; one larger than the limit gets a brief of its own.
+    assert out == [[("a", 2), ("b", 1)], [("c", 3)], [("d", 1)]]
+    assert [[p for p, _ in b] for b in rank.batches(rows, 2)] == [["a"], ["b"], ["c"], ["d"]]

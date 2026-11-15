@@ -152,7 +152,7 @@ unit.
 | `sdive builds <p> [--failed]` | Builds ok/failed and in-scope `.c` files no build compiles, per priority; `--failed` shows the end of each failed log. |
 | `/sdive-rank <p> [N\|all] [--parallel P] [--min-priority K]` | Hands batches of whole files (best-scored first, functions with no judgement yet) to `sdive-ranker` (a Sonnet subagent, blind like the others), records its judgements and rescores. Default `--min-priority 4`: rank where the deep work will go. |
 | `sdive rank show <p> [--top N] [--files] [--area A]` | The queue order: units (or files) by score, with reach and signals. |
-| `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. |
+| `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. `sdive todo <p> --kind rank` counts the briefs left and their agent-minutes. |
 | `sdive rank brief <p>` / `sdive rank record <id>` | What the skill runs: write a rank brief to staging (it leases its functions until recorded); validate and store a result (`sdive schema rank`). |
 | `sdive rank rescore <p>` | Recompute scores (`sdive units` also does). |
 
@@ -206,7 +206,7 @@ applies everywhere (MCUboot's lenses).
 
 | Command | What it does |
 |---|---|
-| `sdive todo <p> [--minutes M]` | Work left per kind and lens, with agent-minute estimates from past runs. |
+| `sdive todo <p> [--minutes M] [--kind K] [--rank-min-priority K]` | Work left per kind and lens, with agent-minute estimates from past runs: ranker briefs still to write (functions at priority ≥ K with no judgement, default 4; timed from brief to record), then dives, sweeps and verification. |
 | `sdive run <p> [auto\|sweep\|dive\|verify] [LENS] [--minutes M \| --runs N] [--parallel P]` | Launches a headless Claude session on the matching skill. `auto` runs verify first, then the next lens in `sweep_order` with work left, then dives. Progress streams to the terminal; the log and reported cost go to the ledger's `sessions/`. `-i` opens an interactive session instead; `--dry-run` prints the command. |
 | `/sdive-sweep <p> <lens\|all> [N\|all] [--minutes M]` | The sweep skill, run interactively. |
 | `/sdive-dive <p> [N\|all] [--minutes M]` | The dive skill. |

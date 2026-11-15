@@ -394,7 +394,7 @@ def queue_estimate(
     return runs
 
 
-DEFAULT_MINUTES = {"dive": 3.0, "sweep": 8.0, "verify": 2.0}
+DEFAULT_MINUTES = {"dive": 3.0, "sweep": 8.0, "verify": 2.0, "rank": 1.0}
 
 
 def run_minutes(conns: list[sqlite3.Connection], project: str) -> dict[str, tuple[float, int]]:
@@ -409,6 +409,10 @@ def run_minutes(conns: list[sqlite3.Connection], project: str) -> dict[str, tupl
                 (project,)):
             if r["kind"] in samples and r["m"] is not None and r["m"] > 0:
                 samples[r["kind"]].append(r["m"])
+        # Rank briefs are not runs; time them from brief to record.
+        samples["rank"] += [r["m"] for r in conn.execute(
+            "SELECT (julianday(recorded_at) - julianday(created_at)) * 1440 AS m "
+            "FROM rank_briefs WHERE project = ?", (project,)) if r["m"] and r["m"] > 0]
     out = {}
     for kind, xs in samples.items():
         if xs:

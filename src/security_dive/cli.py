@@ -468,20 +468,26 @@ def _ledger_conns(cfg: Config) -> list:
 @click.option("--rev", help="Snapshot revision (default: the default branch).")
 @click.option("--lens", "only", multiple=True, help="Only these lenses (repeatable).")
 @click.option("--area", help="Only this area.")
-@click.option("--kind", "kinds", multiple=True, type=click.Choice(["dive", "sweep", "verify"]),
+@click.option("--kind", "kinds", multiple=True,
+              type=click.Choice(["rank", "dive", "sweep", "verify"]),
               help="Only these run kinds (repeatable).")
+@click.option("--rank-min-priority", type=int, default=4, show_default=True,
+              help="Ranking row: only functions in areas of at least this priority.")
 @click.option("--minutes", type=float,
               help="Also show how many runs of each fit in this many agent-minutes.")
 @click.option("--detail", is_flag=True, help="List every estimated run.")
 @pass_ctx
 def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str | None,
-         kinds: tuple[str, ...], minutes: float | None, detail: bool) -> None:
-    """Estimate the work left: runs per lens as `next` would hand them out,
-    and agent-minutes (median run time, pooled over every ledger).
+         kinds: tuple[str, ...], rank_min_priority: int, minutes: float | None,
+         detail: bool) -> None:
+    """Estimate the work left: ranker briefs, runs per lens as `next` would
+    hand them out, and agent-minutes (median run time, pooled over every
+    ledger).
 
-    Dives use the holistic lens; sweeps every other lens. Agent-minutes track
-    cost (parallel runs add up; they only save wall-clock time). Use --minutes
-    to size a session, e.g. `/sdive-dive <project> --minutes 40`.
+    Ranking counts the briefs `/sdive-rank --min-priority K` would still
+    write. Dives use the holistic lens; sweeps every other lens. Agent-minutes
+    track cost (parallel runs add up; they only save wall-clock time). Use
+    --minutes to size a session, e.g. `/sdive-dive <project> --minutes 40`.
     """
     p = c.project(project)
     sha, snap = _snapshot_for(c, p, rev)
@@ -508,6 +514,18 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
         return cells
 
     details = []
+    if (not kinds or "rank" in kinds) and not only:
+        rows = [r for r in rank.unranked(c.conn, snap, rank_min_priority)
+                if area is None or r["area"] == area]
+        briefs = list(rank.batches(rows))
+        t.add_row("rank", f"pri ≥ {rank_min_priority}", str(len(briefs)), str(len(rows)),
+                  str(sum(r["end_line"] - r["start_line"] + 1 for r in rows)),
+                  *est("rank", len(briefs)), briefs[0][0][0] if briefs else "")
+        details += [("rank", "", i, {"functions": sum(len(f) for _, f in b),
+                                     "lines": sum(r["end_line"] - r["start_line"] + 1
+                                                  for _, f in b for r in f),
+                                     "paths": [p for p, _ in b]})
+                    for i, b in enumerate(briefs, 1)]
     for kind, lens in plan:
         runs = ledger.queue_estimate(c.conn, p, snap, kind, lens, area)
         nxt = ""
@@ -533,7 +551,7 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
                    f"(`sdive runs {project} --status started`; record or abandon them)")
     if detail:
         for kind, lens, i, r in details:
-            where = r["paths"][0] if kind == "dive" else ", ".join(r["areas"])
+            where = r["paths"][0] if kind in ("dive", "rank") else ", ".join(r["areas"])
             click.echo(f"{kind:5} {lens:16} #{i:<3} {r['functions']:4} fn {r['lines']:6} lines"
                        f"  {where}")
 

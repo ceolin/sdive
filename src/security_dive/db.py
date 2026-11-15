@@ -265,6 +265,18 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (snapshot_id, path)
     );
     """,
+    # v9: rank briefs recorded, for timing (`sdive todo` estimates ranking
+    # from them; ranking is not a ledger run).
+    """
+    CREATE TABLE rank_briefs (
+        brief_id     TEXT PRIMARY KEY,
+        project      TEXT NOT NULL,
+        snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
+        functions    INTEGER NOT NULL,
+        created_at   TEXT NOT NULL,
+        recorded_at  TEXT NOT NULL
+    );
+    """,
 ]
 
 
