@@ -84,14 +84,15 @@ def import_items(corpus_dirs: list[Path]) -> list[dict]:
                 "files": files,
                 "scanned_commit": disc.get("scanned_commit") or res.get("scanned_commit"),
                 "fix_sha": None if disc else res.get("sha"),
+                "fix_base": None if disc else res.get("fix_base"),
                 "functions": _as_list(res.get("affected_functions")),
                 "origin": str(d),
             })
     return items
 
 
-def _functions_at(mirror: Path, rev: str, path: str) -> dict[str, int]:
-    """Function name -> first start line in `path` at `rev` (empty if absent)."""
+def _function_texts(mirror: Path, rev: str, path: str) -> dict[str, tuple[int, str]]:
+    """Function name -> (first start line, its text) in `path` at `rev`."""
     from .repo import GitError, git
     from .units import extract_source
 
@@ -99,11 +100,31 @@ def _functions_at(mirror: Path, rev: str, path: str) -> dict[str, int]:
         text = git("-C", mirror, "show", f"{rev}:{path}")
     except GitError:
         return {}
-    out: dict[str, int] = {}
+    lines = text.split("\n")
+    out: dict[str, tuple[int, str]] = {}
     for u in extract_source(path, text.encode(), "x", 0):
         if u.kind == "function" and u.symbol not in out:
-            out[u.symbol] = u.start_line
+            out[u.symbol] = (u.start_line, "\n".join(lines[u.start_line - 1:u.end_line]))
     return out
+
+
+def _functions_at(mirror: Path, rev: str, path: str) -> dict[str, int]:
+    """Function name -> first start line in `path` at `rev` (empty if absent)."""
+    return {k: v[0] for k, v in _function_texts(mirror, rev, path).items()}
+
+
+def _unchanged_since(mirror: Path, rev: str, base: str, item: dict) -> bool:
+    """Whether every affected function the fix's base has is identical at
+    `rev`: then the bug the fix closes was certainly live at `rev` (a changed
+    function may have gained the bug after `rev`)."""
+    for comp in item["files"]:
+        for path in _files_under(mirror, base, comp):
+            then = _function_texts(mirror, base, path)
+            now = _function_texts(mirror, rev, path)
+            for fn in item.get("functions", []):
+                if fn in then and (fn not in now or now[fn][1] != then[fn][1]):
+                    return False
+    return True
 
 
 def _files_under(mirror: Path, rev: str, component: str) -> list[str]:
@@ -118,13 +139,18 @@ def _files_under(mirror: Path, rev: str, component: str) -> list[str]:
 
 
 def at_revision(items: list[dict], mirror: Path, rev: str,
-                paths: list[str] | None = None) -> tuple[list[dict], dict[str, int]]:
+                paths: list[str] | None = None, unchanged: bool = False,
+                area_of=None, areas: list[str] | None = None,
+                ) -> tuple[list[dict], dict[str, int]]:
     """Restrict silent-fix truth items (zepsec units whose `result.json` names
     the fix commit `sha`, `affected_components` and `affected_functions`) to
     those live at `rev`: fixed after it (the fix is not an ancestor of `rev`)
     and with an affected function present there. Each kept item's site
     becomes that function's location at `rev`. `paths` globs narrow the
-    scope by site. Returns the kept items and counts of what was dropped."""
+    scope by site; `areas` (with `area_of`, path -> area name) by area.
+    `unchanged` keeps only items whose affected functions are identical at
+    `rev` and at the fix's base (`fix_base`, else the fix's parent).
+    Returns the kept items and counts of what was dropped."""
     import subprocess
 
     from .config import glob_match
@@ -162,6 +188,13 @@ def at_revision(items: list[dict], mirror: Path, rev: str,
         if paths and not any(glob_match(g, site["path"]) for g in paths):
             drop("outside --paths")
             continue
+        if areas and area_of(site["path"]) not in areas:
+            drop("outside --areas")
+            continue
+        if unchanged and not _unchanged_since(mirror, rev, item.get("fix_base") or f"{fix}~1",
+                                              item):
+            drop("affected function changed between the revision and the fix")
+            continue
         kept.append({**item, "site": site, "scanned_commit": rev,
                      "files": [site["path"], *[f for f in item["files"] if f != site["path"]]]})
     return kept, dropped
@@ -172,19 +205,24 @@ def truth_path(cfg: Config, project: str, name: str) -> Path:
 
 
 def save_truth(cfg: Config, project: str, name: str, corpus_dirs: list[Path],
-               at: str | None = None, paths: list[str] | None = None) -> dict:
+               at: str | None = None, paths: list[str] | None = None,
+               unchanged: bool = False, areas: list[str] | None = None) -> dict:
     """Import truth; with `at` (a commit SHA), silent-fix corpora are
     restricted to the items live at that commit (see `at_revision`)."""
     items = import_items(corpus_dirs)
     dropped: dict[str, int] = {}
     if at is not None:
-        items, dropped = at_revision(items, cfg.mirror_path(project), at, paths)
+        p = cfg.project(project)
+        items, dropped = at_revision(items, cfg.mirror_path(project), at, paths, unchanged,
+                                     lambda path: p.area_for(path).name, areas)
     data = {
         "name": name,
         "project": project,
         "imported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "sources": [str(c) for c in corpus_dirs],
         "at": at,
+        "unchanged": unchanged,
+        "areas": areas,
         "dropped": dropped,
         "items": items,
     }

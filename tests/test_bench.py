@@ -134,3 +134,35 @@ def test_import_silent_fixes_at_revision(tmp_path, cfg, upstream):
     assert data["dropped"] == {"fixed at or before the revision": 1,
                                "no affected function at the revision": 1,
                                "outside --paths": 1}
+
+
+def test_import_unchanged_and_areas(tmp_path, cfg, upstream):
+    from .conftest import commit, git
+    base = git(upstream, "rev-parse", "HEAD")
+    # helper changes after `base` (the bug may have come in then), then is fixed.
+    (upstream / "src" / "util.c").write_text("int helper(void)\n{\n    return 3;\n}\n")
+    commit(upstream, "rework helper")
+    (upstream / "src" / "util.c").write_text("int helper(void)\n{\n    return 4;\n}\n")
+    fix_helper = commit(upstream, "fix helper")
+    p = (upstream / "src" / "parser.c")
+    p.write_text(p.read_text() + "\n/* fixed */\n")
+    fix_parser = commit(upstream, "fix parser")
+    repo.ensure_mirror(cfg, cfg.project("demo"))
+    c = tmp_path / "corpus"
+    units = {
+        "changed": {"is_vulnerability": "yes", "sha": fix_helper,
+                    "affected_components": ["src/util.c"], "affected_functions": ["helper"]},
+        "same": {"is_vulnerability": "yes", "sha": fix_parser,
+                 "affected_components": ["src/parser.c"], "affected_functions": ["check_len"]},
+    }
+    for name, res in units.items():
+        (c / name).mkdir(parents=True)
+        (c / name / "result.json").write_text(json.dumps(res))
+    data = bench.save_truth(cfg, "demo", "u", [c], at=base, unchanged=True)
+    assert [i["id"] for i in data["items"]] == ["same"]
+    assert data["dropped"] == {"affected function changed between the revision and the fix": 1}
+    area = cfg.project("demo").area_for("src/parser.c").name
+    data = bench.save_truth(cfg, "demo", "u", [c], at=base, areas=["no-such-area"])
+    assert data["items"] == [] and data["dropped"] == {"outside --areas": 2}
+    data = bench.save_truth(cfg, "demo", "u", [c], at=base, areas=[area])
+    assert "same" in [i["id"] for i in data["items"]]

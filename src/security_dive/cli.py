@@ -1133,13 +1133,22 @@ def bench() -> None:
 @click.option("--at", "at_rev", help="Silent-fix corpora: keep only items live at this "
               "commit (fixed after it, affected function present), sited there.")
 @click.option("--paths", multiple=True, help="With --at: only items sited under these globs.")
+@click.option("--areas", help="With --at: only items sited in these areas (comma-separated).")
+@click.option("--unchanged", is_flag=True,
+              help="With --at: only items whose affected functions are identical at --at "
+                   "and at the fix's base (the bug was certainly live).")
 @pass_ctx
 def bench_import(c: Ctx, project: str, corpus: tuple[Path, ...], name: str,
-                 at_rev: str | None, paths: tuple[str, ...]) -> None:
+                 at_rev: str | None, paths: tuple[str, ...], areas: str | None,
+                 unchanged: bool) -> None:
     """Import ground truth from zepsec-style analysis directories."""
     p = c.project(project)
     at = repo.resolve(c.cfg, p, at_rev) if at_rev else None
-    data = bench_mod.save_truth(c.cfg, project, name, list(corpus), at, list(paths) or None)
+    area_list = [a.strip() for a in areas.split(",")] if areas else None
+    for a in area_list or []:
+        p.area_named(a)
+    data = bench_mod.save_truth(c.cfg, project, name, list(corpus), at, list(paths) or None,
+                                unchanged, area_list)
     counts = defaultdict(int)
     for item in data["items"]:
         counts[item["verdict"]] += 1

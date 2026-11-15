@@ -24,8 +24,8 @@ sdive builds <p>
 sdive rank show <p>
 
 # 2. Calibrate (optional; blind benchmark at a commit with known answers)
-sdive bench import <p> <corpus>... --name <set>
-/sdive-bench <p> <set> --rev <commit>
+sdive bench import <p> <corpus>... --name <set> [--at REV --areas A,B --unchanged]
+/sdive-bench <p> <set> --rev <commit> [--areas A,B]
 sdive --ledger <round> bench report <p> <set> --rev <commit>
 sdive --ledger <round> bench judge <p> <set> <item> <slug>...
 sdive carry <p> --from <round>
@@ -164,8 +164,8 @@ before trusting a lens or prompt change on current code.
 
 | Step | What it does |
 |---|---|
-| `sdive bench import <p> <corpus>... --name <set> [--at REV] [--paths GLOB]` | Imports ground truth from zepsec-style analysis directories into `analysis/truth/<p>/<set>.json`. Disclosure corpora (MCUboot's) carry their own sites. Silent-fix corpora (Zephyr's: `result.json` naming the fix commit `sha`, `affected_components`, `affected_functions`) need `--at REV`: only items fixed after REV whose affected function exists at REV are kept, sited at that function; `--paths` narrows by site (e.g. net and Bluetooth). |
-| `/sdive-bench <p> <set> --rev <commit>` | Creates a fresh ledger (`bench-<set>-<date>`), runs sweeps and dives at `<commit>`, verifies every hypothesis, then scores. |
+| `sdive bench import <p> <corpus>... --name <set> [--at REV] [--paths GLOB] [--areas A,B] [--unchanged]` | Imports ground truth from zepsec-style analysis directories into `analysis/truth/<p>/<set>.json`. Disclosure corpora (MCUboot's) carry their own sites. Silent-fix corpora (Zephyr's: `result.json` naming the fix commit `sha`, `affected_components`, `affected_functions`) need `--at REV`: only items fixed after REV whose affected function exists at REV are kept, sited at that function; `--paths` and `--areas` narrow by site (e.g. net and Bluetooth, or the areas a round will cover); `--unchanged` keeps only items whose affected functions are identical at REV and at the fix's base (`fix_base` in `result.json`, else the fix's parent), so the bug was certainly live at REV. A corpus can also be built from a project's public fixes: one directory per advisory with `result.json` giving the fix commit and the functions its diff touches. |
+| `/sdive-bench <p> <set> --rev <commit> [--areas A,B] [--parallel P]` | Creates a fresh ledger (`bench-<set>-<date>`), runs sweeps and dives at `<commit>` (only in `--areas` when given: on Zephyr a whole-tree round costs as much as a full analysis), verifies every hypothesis, then scores. |
 | `sdive --ledger <round> bench report <p> <set> --rev <commit>` | Scores the round: location matches against truth items are only *candidates*. |
 | `sdive --ledger <round> bench judge <p> <set> <item> <slug>...` | Records, by human judgement, which findings really raise each truth item (`adjudication.json`). |
 | `sdive carry <p> --from <round>` | Copies the round's verified findings into the main ledger as hypotheses at `main`, with locations remapped, so ordinary verification shows which are still live. |

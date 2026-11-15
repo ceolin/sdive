@@ -1,7 +1,7 @@
 ---
 name: sdive-bench
-description: Run a blind security-dive benchmark round — a fresh disposable ledger at a commit with known ground truth, sweeps and dives with the current lenses and agents, verification of every hypothesis, then a scored report. Invoke as /sdive-bench <project> <truth-set> --rev <commit> [--round NAME] [--dives N|all] [--sweeps all|none|<lens,...>]. Use to calibrate lenses and agent prompts before analysing current code.
-argument-hint: "<project> <truth-set> --rev <commit> [--round NAME] [--dives all] [--sweeps all]"
+description: Run a blind security-dive benchmark round — a fresh disposable ledger at a commit with known ground truth, sweeps and dives with the current lenses and agents, verification of every hypothesis, then a scored report. Invoke as /sdive-bench <project> <truth-set> --rev <commit> [--round NAME] [--areas a,b,...] [--dives N|all] [--sweeps all|none|<lens,...>] [--parallel P]. Use to calibrate lenses and agent prompts before analysing current code.
+argument-hint: "<project> <truth-set> --rev <commit> [--round NAME] [--areas a,b] [--dives all] [--sweeps all] [--parallel P]"
 allowed-tools: Bash, Read, Agent, SendMessage
 ---
 
@@ -15,17 +15,27 @@ any agent reads the ground truth until the analysis is finished. Only the final
 `<project>`, `<truth-set>` (e.g. `vanessa`, imported earlier with
 `sdive bench import`), `--rev` (required, e.g. `511dc9e2`), `--round` (ledger
 name; default `bench-<truth-set>-<YYYYMMDD>`; refuse to reuse an existing
-ledger directory under `analysis/ledgers/` — rounds start clean), `--dives`
-(default `all`), `--sweeps` (default `all`).
+ledger directory under `analysis/ledgers/` — rounds start clean), `--areas`
+(comma-separated; default: the whole project), `--dives` (default `all`),
+`--sweeps` (default `all`), `--parallel` (default 1, passed to each skill).
+
+On a tree the size of Zephyr a whole-project round costs about as much as a
+full analysis. Restrict it with `--areas`, and import the truth set with the
+same `--areas` (`sdive bench import ... --at <rev> --areas ...`) so recall is
+measured over code the round covers. Areas are chosen before the round from
+the truth set's import summary (item counts per area), never by reading
+items; nothing about them goes into briefs.
 
 ## Steps
 
 1. **Fresh ledger:** `uv run sdive --ledger <round> units <project> <rev>` —
    snapshots and indexes the commit in the new ledger.
 2. **Sweeps** (unless `none`): follow the /sdive-sweep procedure with
-   `--ledger <round> --rev <rev>` for each requested lens.
+   `--ledger <round> --rev <rev>` for each requested lens (with `--areas`:
+   once per area, `--area A`).
 3. **Dives:** follow the /sdive-dive procedure with `--ledger <round> --rev <rev>`
-   and the `holistic` lens, for the requested count.
+   and the `holistic` lens, for the requested count (with `--areas`: once per
+   area, `--area A`).
 4. **Verify:** follow the /sdive-verify procedure with `--ledger <round>` and
    `all`.
 5. **Score:** `uv run sdive --ledger <round> bench report <project> <truth-set> --rev <rev>`.
