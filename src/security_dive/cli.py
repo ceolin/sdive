@@ -656,6 +656,8 @@ def record_(c: Ctx, run_id: int, path: Path | None) -> None:
             click.echo(f"  {len(r.missing)} target(s) not reported (left uncovered):")
             for key in r.missing:
                 click.echo(f"    {key}")
+    if r.shortened:
+        click.echo(f"  {r.shortened} title(s) over {ledger.TITLE_MAX} characters shortened")
     if r.dossiers:
         click.echo(f"  dossiers updated: {', '.join(r.dossiers)}")
     for title in r.upstream:

@@ -611,6 +611,24 @@ class RecordReport:
     verdict: str | None = None
     dossiers: list[str] = field(default_factory=list)
     upstream: list[str] = field(default_factory=list)
+    shortened: int = 0
+
+
+TITLE_MAX = 120
+
+
+def _shorten_titles(data: dict) -> int:
+    """Cut over-long hypothesis and upstream-note titles to TITLE_MAX in
+    place (agents miscount characters; a title is only a label, and the
+    full claim is kept). Returns how many were cut."""
+    n = 0
+    for key in ("hypotheses", "upstream_notes"):
+        for item in data.get(key) or []:
+            t = item.get("title") if isinstance(item, dict) else None
+            if isinstance(t, str) and len(t) > TITLE_MAX:
+                item["title"] = t[:TITLE_MAX - 1].rstrip() + "…"
+                n += 1
+    return n
 
 
 def _slugify(text: str) -> str:
@@ -666,6 +684,7 @@ def record(conn: sqlite3.Connection, cfg: Config, run_id: int, data: dict) -> Re
         raise LedgerError(f"run {run_id} is {run['status']}, not started")
     project = cfg.project(run["project"])
     schema = VerifyResult if run["kind"] == "verify" else AuditResult
+    shortened = _shorten_titles(data) if isinstance(data, dict) else 0
     try:
         result = schema.model_validate(data)
     except ValidationError as e:
@@ -684,7 +703,7 @@ def record(conn: sqlite3.Connection, cfg: Config, run_id: int, data: dict) -> Re
             raise LedgerError(f"upstream note component {un.component!r} is not a reference "
                               f"tree of this snapshot (known: {known})")
 
-    report = RecordReport(run_id, run["kind"])
+    report = RecordReport(run_id, run["kind"], shortened=shortened)
     with conn:
         if isinstance(result, AuditResult):
             _record_audit(conn, run, result, report)

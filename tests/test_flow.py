@@ -457,3 +457,12 @@ def test_lens_applicability_scopes_queue_and_coverage(cfg, indexed):
     (p.lenses_dir / "bad.md").write_text("---\napplies:\n  area: [x]\n---\n")
     with pytest.raises(ledger.LedgerError, match="unknown applies keys"):
         ledger.lens_scope(p, "bad")
+
+
+def test_shorten_titles():
+    data = {"hypotheses": [{"title": "x" * 130}, {"title": "ok"}],
+            "upstream_notes": [{"title": "y" * 121}]}
+    assert ledger._shorten_titles(data) == 2
+    assert len(data["hypotheses"][0]["title"]) == ledger.TITLE_MAX
+    assert data["hypotheses"][0]["title"].endswith("…")
+    assert data["hypotheses"][1]["title"] == "ok"
