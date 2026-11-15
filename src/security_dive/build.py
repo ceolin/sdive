@@ -93,6 +93,14 @@ def _as_list(v) -> list[str]:
     return [str(x) for x in v]
 
 
+def _unquote(arg: str) -> str:
+    """`KEY="value"` (as twister YAML often writes it) -> `KEY=value`."""
+    key, _, value = arg.partition("=")
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return f"{key}={value}"
+
+
 def scenarios(tree: Path, suite: str, default_board: str) -> list[BuildDef]:
     """One BuildDef per scenario in the suite directory's scenario files.
 
@@ -123,7 +131,7 @@ def scenarios(tree: Path, suite: str, default_board: str) -> list[BuildDef]:
                      + _as_list(sc.get("platform_allow")))
             usable = [p for p in plats if _usable(p)]
             board = usable[0] if usable else default_board
-            args = [f"-D{a}" for a in _as_list(sc.get("extra_args")) if "=" in a]
+            args = [f"-D{_unquote(a)}" for a in _as_list(sc.get("extra_args")) if "=" in a]
             args += [f"-D{c}" for c in _as_list(sc.get("extra_configs"))
                      if c.startswith("CONFIG_")]
             for key, var in (("extra_conf_files", "EXTRA_CONF_FILE"),

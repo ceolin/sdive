@@ -17,7 +17,7 @@ def test_scenarios_pick_usable_platforms(tmp_path):
         tests:
           drivers.uart.build:
             extra_configs: [CONFIG_SERIAL=y, "arch:arm:CONFIG_X=y"]
-            extra_args: DTC_OVERLAY_FILE=a.overlay
+            extra_args: DTC_OVERLAY_FILE="a.overlay"
           drivers.uart.native_only:
             integration_platforms: []
             platform_allow: [native_sim, native_sim/native/64]
