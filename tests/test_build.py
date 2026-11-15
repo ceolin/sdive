@@ -28,7 +28,9 @@ def test_scenarios_pick_usable_platforms(tmp_path):
             skip: true
         """))
     defs = {d.name: d for d in build.scenarios(tmp_path, "tests/drivers/build_all", "qemu_x86")}
-    assert set(defs) == {"drivers.uart.build", "drivers.uart.default"}
+    assert set(defs) == {"drivers.uart.build", "drivers.uart.default",
+                         "drivers.uart.native_only"}
+    assert defs["drivers.uart.native_only"].board == "qemu_x86"
     b = defs["drivers.uart.build"]
     assert (b.board, b.app) == ("frdm_k64f", "tests/drivers/build_all/uart")
     assert b.args == ["-DDTC_OVERLAY_FILE=a.overlay", "-DCONFIG_SERIAL=y"]

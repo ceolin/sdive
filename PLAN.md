@@ -377,8 +377,11 @@ In order:
    host, mcumgr over UDP/FS/shell and over BT, user mode on an MPU
    Cortex-M) and suites: every scenario of Zephyr's `tests/drivers/build_all`,
    `tests/{net,bluetooth,subsys,kernel,arch,lib}` and
-   `samples/{net,bluetooth,subsys}` on its first usable platform (2.3k
-   builds; native_sim and bsim are Linux-only and skipped). They run in a
+   `samples/{net,bluetooth,subsys}` on its first usable platform (3.2k
+   builds; native_sim and bsim are Linux-only, so scenarios listing only
+   those are tried on the default board instead: otherwise Mesh, SSH,
+   WireGuard, QUIC and OBEX, tested only on native_sim, would count as
+   unbuilt). They run in a
    west workspace under `work/west/` with modules at the snapshot's
    `west.yml`, cloned with `~/zephyrproject` as `--path-cache` (never
    written; its venv runs with `PYTHONDONTWRITEBYTECODE`). Code no build

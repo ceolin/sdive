@@ -97,8 +97,10 @@ def scenarios(tree: Path, suite: str, default_board: str) -> list[BuildDef]:
     """One BuildDef per scenario in the suite directory's scenario files.
 
     The board is the first usable entry of `integration_platforms`, then
-    `platform_allow`, else `default_board` (unless every allowed platform is
-    a native/simulation host, which macOS cannot configure: skipped).
+    `platform_allow`, else `default_board`, which also stands in when every
+    listed platform is a native/simulation host (Linux-only): many network
+    and Bluetooth suites test only on native_sim, and their code should not
+    count as unbuilt for that.
     Twister `filter` expressions are ignored; a scenario whose configuration
     fails is recorded as failed.
     """
@@ -120,8 +122,6 @@ def scenarios(tree: Path, suite: str, default_board: str) -> list[BuildDef]:
             plats = (_as_list(sc.get("integration_platforms"))
                      + _as_list(sc.get("platform_allow")))
             usable = [p for p in plats if _usable(p)]
-            if plats and not usable:
-                continue
             board = usable[0] if usable else default_board
             args = [f"-D{a}" for a in _as_list(sc.get("extra_args")) if "=" in a]
             args += [f"-D{c}" for c in _as_list(sc.get("extra_configs"))
