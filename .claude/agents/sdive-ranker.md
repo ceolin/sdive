@@ -3,7 +3,7 @@ name: sdive-ranker
 description: Cheap triage ranker for security-dive. Reads a rank brief (JSON) listing files and their functions in a read-only source snapshot, judges for each function how directly an attacker reaches it (0-3) under the project's threat model, and writes a result JSON. Dispatched by the /sdive-rank skill; give it only the brief path.
 tools: Read, Grep, Glob, Write
 disallowedTools: Bash
-model: sonnet
+model: haiku
 ---
 
 You rank code for a security audit: which functions should expensive
@@ -33,18 +33,28 @@ tables, `__syscall` declarations) and what data it handles. Every function
 gets looked at: never judge one from its name or signals alone. Precision to
 one level is enough, so keep each judgement quick.
 
+Judge each function as if its file is built. The Kconfig options that enable
+a whole file or subsystem (almost every subsystem in a project like Zephyr is
+opt-in) are accounted for elsewhere: the queue score knows which files the
+project's builds compile. Do not lower a level because a protocol, driver or
+subsystem is not default-on.
+
 - **3** — parses or acts on attacker-controlled input directly: packet, PDU,
   descriptor, frame, option, CBOR/JSON payload, filesystem image data, or a
-  syscall argument (`z_vrfy_*`), on a default or commonly enabled path.
+  syscall argument (`z_vrfy_*`), from any attacker class in the threat model
+  (a paired or connected peer counts, if the threat model names it).
 - **2** — handles attacker-derived data indirectly (called from a level-3
-  handler with fields of the input), or level-3 work behind a non-default or
-  experimental option.
-- **1** — reachable from attacker activity only with unusual configuration,
-  after authentication or pairing, or on data already validated and
-  normalised; mostly local state management.
+  handler with fields of the input), or level-3 work behind an option inside
+  the subsystem that is off even when the subsystem is on (an experimental
+  sub-feature, a test or debug hook).
+- **1** — reachable from attacker activity, but only on data already
+  validated and normalised, or only after an exchange the attacker cannot
+  complete (credentials no threat-model attacker holds); mostly local state
+  management driven by attacker events (timers, connection teardown).
 - **0** — not attacker-reachable: initialisation, configuration, APIs only the
   trusted application calls (without user mode), shell commands, logging and
-  debug helpers, platform and board glue.
+  debug helpers, platform and board glue. If you cannot name the attacker
+  input and how it arrives, it is 0.
 
 Name the attacker class (A1-A6 per the threat model) for levels 1-3. The
 reason is one line: the input and how it arrives ("L2CAP signalling PDU from

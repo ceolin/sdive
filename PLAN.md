@@ -396,7 +396,7 @@ In order:
    `sys_get_le*`, zcbor decoding, copies, length arithmetic, `z_vrfy_*` /
    `K_SYSCALL_*`, assertion-only length checks, refcounting, handler-like
    names; capped at +1.5), plus the reach judged by `/sdive-rank` (the
-   `sdive-ranker` subagent on Sonnet, file by file, 0–3 → −2 … +1.5),
+   `sdive-ranker` subagent on Haiku, file by file, 0–3 → −2 … +1.5),
    minus 1.5 for code no recorded build compiles once builds exist. Mythos
    time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
    LwM2M/CoAP/MQTT, Bluetooth host + controller, USB device and host
