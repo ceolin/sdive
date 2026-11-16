@@ -411,8 +411,9 @@ def rank_brief(c: Ctx, project: str, rev: str | None, max_functions: int,
 @pass_ctx
 def rank_record(c: Ctx, brief_id: str, path: Path | None) -> None:
     """Validate and store a ranker result, then rescore the snapshot."""
-    n = rank.record(c.conn, c.cfg, brief_id, path)
-    click.echo(f"recorded reach for {n} functions; rescored")
+    n, shortened = rank.record(c.conn, c.cfg, brief_id, path)
+    cut = f" ({shortened} over-long reasons shortened)" if shortened else ""
+    click.echo(f"recorded reach for {n} functions; rescored{cut}")
 
 
 @rank_grp.command("rescore")

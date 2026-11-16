@@ -309,10 +309,27 @@ def write_brief(conn: sqlite3.Connection, cfg: Config, project: Project, snap: i
     return b
 
 
+REASON_MAX = 200
+
+
+def _shorten_reasons(data: object) -> int:
+    """Cut over-long reasons to REASON_MAX in place (Haiku miscounts
+    characters; a reason is a one-line note). Returns how many were cut."""
+    n = 0
+    units = data.get("units") if isinstance(data, dict) else None
+    for u in units if isinstance(units, list) else []:
+        r = u.get("reason") if isinstance(u, dict) else None
+        if isinstance(r, str) and len(r) > REASON_MAX:
+            u["reason"] = r[:REASON_MAX - 1].rstrip() + "…"
+            n += 1
+    return n
+
+
 def record(conn: sqlite3.Connection, cfg: Config, brief_id: str,
-           result_path: Path | None = None) -> int:
+           result_path: Path | None = None) -> tuple[int, int]:
     """Validate a ranker result against its brief, store the judgements,
-    rescore the snapshot. Returns the number of units judged."""
+    rescore the snapshot. Returns the number of units judged and the number
+    of over-long reasons shortened."""
     bpath = cfg.staging / f"rank-{brief_id}.brief.json"
     if not bpath.is_file():
         raise RankError(f"no rank brief {brief_id} in {cfg.staging}")
@@ -321,7 +338,12 @@ def record(conn: sqlite3.Connection, cfg: Config, brief_id: str,
     if not rpath.is_file():
         raise RankError(f"no result file {rpath}")
     try:
-        result = RankResult.model_validate_json(rpath.read_text())
+        data = json.loads(rpath.read_text())
+    except json.JSONDecodeError as e:
+        raise RankError(f"result is not valid JSON: {e}") from None
+    shortened = _shorten_reasons(data)
+    try:
+        result = RankResult.model_validate(data)
     except ValidationError as e:
         raise RankError(f"result does not match the RankResult schema:\n{e}") from None
     if result.brief_id != brief_id:
@@ -357,4 +379,4 @@ def record(conn: sqlite3.Connection, cfg: Config, brief_id: str,
     out.write_text(rpath.read_text())
     bpath.unlink()
     rpath.unlink(missing_ok=True)
-    return len(result.units)
+    return len(result.units), shortened

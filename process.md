@@ -156,7 +156,7 @@ new and changed functions.
 | `/sdive-rank <p> [N\|all] [--parallel P] [--min-priority K]` | Hands batches of whole files (best-scored first, functions with no judgement yet) to `sdive-ranker` (a Haiku subagent, blind like the others), each brief sized to an estimated 80K-token context so Haiku stays under its 100K price tier (a larger file is split into line-range pieces), then records the judgements and rescores. Default `--min-priority 4`: rank where the deep work will go. |
 | `sdive rank show <p> [--top N] [--files] [--area A]` | The queue order: units (or files) by score, with reach and signals. |
 | `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. `sdive todo <p> --kind rank` counts the briefs left and their agent-minutes. |
-| `sdive rank brief <p>` / `sdive rank record <id>` | What the skill runs: write a rank brief to staging (it leases its functions until recorded; `--max-tokens` sets the context budget); validate and store a result (`sdive schema rank`). |
+| `sdive rank brief <p>` / `sdive rank record <id>` | What the skill runs: write a rank brief to staging (it leases its functions until recorded; `--max-tokens` sets the context budget); validate and store a result (`sdive schema rank`; reasons over 200 characters are shortened rather than rejected). |
 | `sdive rank rescore <p>` | Recompute scores (`sdive units` also does). |
 
 ## 2. Calibrate (optional)

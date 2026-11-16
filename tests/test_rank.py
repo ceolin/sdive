@@ -54,9 +54,11 @@ def test_rank_brief_record_rescore(cfg, indexed):  # noqa: F811
         json.dump({**res, "units": res["units"][:2]}, f)
     with pytest.raises(rank.RankError, match="no judgement"):
         rank.record(conn, cfg, b["brief_id"])
+    res["units"][0]["reason"] = "y" * 250  # Haiku overshoots; recording shortens it
     with open(b["result_path"], "w") as f:
         json.dump(res, f)
-    assert rank.record(conn, cfg, b["brief_id"]) == 3
+    assert rank.record(conn, cfg, b["brief_id"]) == (3, 1)
+    assert len(conn.execute("SELECT reason FROM unit_reach ORDER BY id").fetchone()[0]) == 200
     scores = dict(conn.execute(
         "SELECT u.key, uv.score FROM unit_versions uv JOIN units u ON u.id = uv.unit_id "
         "WHERE uv.snapshot_id = ? AND u.kind = 'function'", (snap,)).fetchall())
