@@ -122,6 +122,78 @@ def rescore(conn: sqlite3.Connection, snap: int) -> int:
 
 RANK_MAX_FUNCTIONS = 80
 
+# A brief's context budget. Haiku is much cheaper while a request stays under
+# 100K tokens of context, so briefs are sized to keep the ranker's last turn
+# below that with room for its searches. The estimate was fitted on measured
+# ranker transcripts: a fixed part (agent prompt, brief envelope, threat
+# model), a per-function part (its brief entry and its result entry), and the
+# source read with line numbers.
+RANK_MAX_TOKENS = 80_000
+RANK_BASE_TOKENS = 18_000
+RANK_TOKENS_PER_FUNCTION = 330
+RANK_TOKENS_PER_BYTE = 0.8
+RANK_HEAD_LINES = 100  # a split file's opening (includes, types) read for context
+
+
+def estimate_tokens(functions: int, source_bytes: int) -> float:
+    """Context one brief piece adds (without the fixed base)."""
+    return RANK_TOKENS_PER_FUNCTION * functions + RANK_TOKENS_PER_BYTE * source_bytes
+
+
+def file_sizer(root: Path):
+    """`size(path, start=None, end=None)`: bytes of a snapshot file, or of a
+    1-based inclusive line range in it (0 for a missing file)."""
+    offsets: dict[str, list[int]] = {}
+
+    def size(path: str, start: int | None = None, end: int | None = None) -> int:
+        if path not in offsets:
+            try:
+                data = (root / path).read_bytes()
+            except OSError:
+                data = b""
+            acc = [0]
+            for line in data.splitlines(keepends=True):
+                acc.append(acc[-1] + len(line))
+            offsets[path] = acc
+        acc = offsets[path]
+        if start is None:
+            return acc[-1]
+        lo = min(max(start - 1, 0), len(acc) - 1)
+        hi = min(max(end or start, lo), len(acc) - 1)
+        return acc[hi] - acc[lo]
+    return size
+
+
+def _pieces(path: str, fns: list, size, max_tokens: float):
+    """A file's functions as brief pieces (path, rows, lines): the whole file
+    (lines None) when it fits the budget, else consecutive line-range chunks
+    that each fit (a single over-large function still gets a chunk)."""
+    budget = max_tokens - RANK_BASE_TOKENS
+    if size is None or estimate_tokens(len(fns), size(path)) <= budget:
+        yield path, fns, None
+        return
+    head = size(path, 1, RANK_HEAD_LINES)
+    chunk: list = []
+    for r in sorted(fns, key=lambda r: r["start_line"]):
+        trial = chunk + [r]
+        cost = estimate_tokens(len(trial), head + size(path, trial[0]["start_line"],
+                                                       r["end_line"]))
+        if chunk and cost > budget:
+            yield path, chunk, [chunk[0]["start_line"], chunk[-1]["end_line"]]
+            chunk = [r]
+        else:
+            chunk = trial
+    if chunk:
+        yield path, chunk, [chunk[0]["start_line"], chunk[-1]["end_line"]]
+
+
+def _piece_cost(piece, size) -> float:
+    path, fns, lines = piece
+    if size is None:
+        return 0.0
+    src = size(path) if lines is None else size(path, 1, RANK_HEAD_LINES) + size(path, *lines)
+    return estimate_tokens(len(fns), src)
+
 
 def _outstanding(cfg: Config) -> set[str]:
     keys: set[str] = set()
@@ -146,39 +218,54 @@ def unranked(conn: sqlite3.Connection, snap: int, min_priority: int = 0) -> list
            ORDER BY uv.score DESC, u.path, uv.start_line""", (snap, min_priority)).fetchall()
 
 
-def batches(rows: list[sqlite3.Row], max_functions: int = RANK_MAX_FUNCTIONS):
-    """Group unranked function rows (best first) into briefs: whole files, in
-    order of their best function, up to `max_functions` per brief (a larger
-    file gets a brief of its own). Yields lists of (path, rows)."""
+def batches(rows: list[sqlite3.Row], max_functions: int = RANK_MAX_FUNCTIONS,
+            size=None, max_tokens: float = RANK_MAX_TOKENS):
+    """Group unranked function rows (best first) into briefs, in order of each
+    file's best function. Yields lists of (path, rows, lines) pieces: whole
+    files (lines None) packed up to `max_functions` and, when `size` (from
+    `file_sizer`) is given, the `max_tokens` context budget; a file too large
+    for the budget is split into line-range chunks, one brief each."""
     files: dict[str, list] = {}
     for r in rows:
         files.setdefault(r["path"], []).append(r)
     batch: list = []
     n = 0
+    cost = float(RANK_BASE_TOKENS)
     for path, fns in files.items():
-        if batch and n + len(fns) > max_functions:
-            yield batch
-            batch, n = [], 0
-        batch.append((path, fns))
-        n += len(fns)
+        for piece in _pieces(path, fns, size, max_tokens):
+            pc = _piece_cost(piece, size)
+            k = len(piece[1])
+            if batch and (n + k > max_functions or piece[2] is not None
+                          or batch[-1][2] is not None or cost + pc > max_tokens):
+                yield batch
+                batch, n, cost = [], 0, float(RANK_BASE_TOKENS)
+            batch.append(piece)
+            n += k
+            cost += pc
     if batch:
         yield batch
 
 
 def write_brief(conn: sqlite3.Connection, cfg: Config, project: Project, snap: int,
-                max_functions: int = RANK_MAX_FUNCTIONS, min_priority: int = 0) -> dict | None:
-    """A rank brief for the best unranked files (whole files, by their best
-    function's score, up to `max_functions`), or None when nothing is left."""
+                max_functions: int = RANK_MAX_FUNCTIONS, min_priority: int = 0,
+                max_tokens: float = RANK_MAX_TOKENS) -> dict | None:
+    """A rank brief for the best unranked files (by their best function's
+    score, within `max_functions` and the `max_tokens` context budget; a file
+    too large for the budget comes as a line range), or None when nothing is
+    left."""
     leased = _outstanding(cfg)
     rows = [r for r in unranked(conn, snap, min_priority) if r["key"] not in leased]
     if not rows:
         return None
-    batch = [{"path": path, "area": fns[0]["area"], "functions": [
-        {"key": r["key"], "symbol": r["symbol"], "start_line": r["start_line"],
-         "end_line": r["end_line"], "signals": json.loads(r["signals"] or "{}")}
-        for r in sorted(fns, key=lambda r: r["start_line"])]}
-        for path, fns in next(batches(rows, max_functions))]
     sha = conn.execute("SELECT sha FROM snapshots WHERE id = ?", (snap,)).fetchone()[0]
+    size = file_sizer(cfg.snapshot_path(project.name, sha))
+    batch = [{"path": path, "area": fns[0]["area"],
+              **({"lines": lines} if lines else {}),
+              "functions": [
+                  {"key": r["key"], "symbol": r["symbol"], "start_line": r["start_line"],
+                   "end_line": r["end_line"], "signals": json.loads(r["signals"] or "{}")}
+                  for r in sorted(fns, key=lambda r: r["start_line"])]}
+             for path, fns, lines in next(batches(rows, max_functions, size, max_tokens))]
     brief_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
     staging = cfg.staging
     staging.mkdir(parents=True, exist_ok=True)

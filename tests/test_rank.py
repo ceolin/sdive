@@ -71,7 +71,36 @@ def test_rank_brief_record_rescore(cfg, indexed):  # noqa: F811
 
 def test_batches_whole_files():
     rows = [{"path": p} for p in ["a", "a", "b", "c", "c", "c", "d"]]
-    out = [[(path, len(fns)) for path, fns in b] for b in rank.batches(rows, 3)]
-    # A file never splits; one larger than the limit gets a brief of its own.
+    out = [[(path, len(fns)) for path, fns, _ in b] for b in rank.batches(rows, 3)]
+    # Without a size budget a file never splits; one larger than the limit
+    # gets a brief of its own.
     assert out == [[("a", 2), ("b", 1)], [("c", 3)], [("d", 1)]]
-    assert [[p for p, _ in b] for b in rank.batches(rows, 2)] == [["a"], ["b"], ["c"], ["d"]]
+    assert [[p for p, _, _ in b] for b in rank.batches(rows, 2)] == [["a"], ["b"], ["c"], ["d"]]
+
+
+def test_batches_context_budget(tmp_path):
+    # Every line is 100 bytes, so sizes are easy to reason about.
+    line = "x" * 99 + "\n"
+    (tmp_path / "big.c").write_text(line * 1000)     # 100 KB: over budget alone
+    (tmp_path / "s1.c").write_text(line * 300)       # 30 KB
+    (tmp_path / "s2.c").write_text(line * 300)
+    size = rank.file_sizer(tmp_path)
+    assert size("s1.c") == 30_000 and size("s1.c", 1, 10) == 1000 and size("nope.c") == 0
+    big = [{"path": "big.c", "start_line": s, "end_line": s + 99} for s in range(1, 1000, 100)]
+    small = [{"path": f, "start_line": 1, "end_line": 300} for f in ("s1.c", "s2.c")]
+    out = list(rank.batches(big + small, size=size, max_tokens=60_000))
+    # 60K budget, 18K base: big.c splits into line ranges (100-line head plus
+    # 330/function + 0.8/byte), each its own brief; the two 30 KB files
+    # (24.3K each) do not fit one brief together.
+    chunks = [b for b in out if b[0][0] == "big.c"]
+    assert all(len(b) == 1 and b[0][2] for b in chunks)
+    assert sum(len(b[0][1]) for b in chunks) == 10
+    for b in chunks:
+        path, fns, (lo, hi) = b[0]
+        assert (lo, hi) == (fns[0]["start_line"], fns[-1]["end_line"])
+        assert rank.RANK_BASE_TOKENS + rank.estimate_tokens(
+            len(fns), size(path, 1, 100) + size(path, lo, hi)) <= 60_000
+    assert [[(p, ln) for p, _, ln in b] for b in out if b[0][0] != "big.c"] == [
+        [("s1.c", None)], [("s2.c", None)]]
+    # With the default budget the small files share a brief.
+    assert [[p for p, _, _ in b] for b in rank.batches(small, size=size)] == [["s1.c", "s2.c"]]

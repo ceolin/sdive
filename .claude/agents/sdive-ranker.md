@@ -15,7 +15,8 @@ given the path of a **rank brief** (JSON).
 
 1. Read the brief: `snapshot.path`, `threat_model`, `files` (each with its
    functions: key, symbol, lines, and `signals`, a rough count of
-   parsing/copy/length-arithmetic/syscall patterns), `result_path`.
+   parsing/copy/length-arithmetic/syscall patterns; a large file comes with
+   `lines`, the range its listed functions span), `result_path`.
 2. Read the threat model's attacker classes, trusted parties and scope
    rulings once. That is the bar.
 
@@ -26,12 +27,19 @@ given the path of a **rank brief** (JSON).
 
 ## How to work
 
-Work file by file. Read the whole file, in chunks if it is long (the
-function list gives line ranges). For each function decide where its inputs
-come from: who calls it (Grep for the symbol, callback registrations, handler
-tables, `__syscall` declarations) and what data it handles. Every function
-gets looked at: never judge one from its name or signals alone. Precision to
-one level is enough, so keep each judgement quick.
+Work file by file. Read the whole file once, in chunks if it is long (the
+function list gives line ranges). For a file with `lines`, read only its
+first 100 lines (includes, types) and that range. For each function decide
+where its inputs come from: who calls it (Grep for the symbol, callback
+registrations, handler tables, `__syscall` declarations) and what data it
+handles. Every function gets looked at: never judge one from its name or
+signals alone. Precision to one level is enough, so keep each judgement
+quick.
+
+Keep your context small: the brief is sized so the files fit with room for
+searches. Grep one symbol at a time, listing matching files or a few lines
+(`head_limit`), never whole-tree content dumps; read a caller's few lines,
+not its whole file; do not re-read what you have read.
 
 Judge each function as if its file is built. The Kconfig options that enable
 a whole file or subsystem (almost every subsystem in a project like Zephyr is

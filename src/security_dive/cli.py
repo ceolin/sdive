@@ -386,14 +386,16 @@ def rank_status(c: Ctx, project: str, rev: str | None) -> None:
 @click.option("--rev", help="Snapshot revision (default: the default branch).")
 @click.option("--max-functions", default=rank.RANK_MAX_FUNCTIONS, show_default=True)
 @click.option("--min-priority", default=0, help="Only areas at this priority or above.")
+@click.option("--max-tokens", default=rank.RANK_MAX_TOKENS, show_default=True,
+              help="Estimated context budget per brief; larger files come as line ranges.")
 @pass_ctx
 def rank_brief(c: Ctx, project: str, rev: str | None, max_functions: int,
-               min_priority: int) -> None:
+               min_priority: int, max_tokens: int) -> None:
     """Write a brief for the sdive-ranker agent (best unranked files first) and
     print it. Exits with status 3 when every function has a judgement."""
     p = c.project(project)
     _sha, snap = _snapshot_for(c, p, rev)
-    b = rank.write_brief(c.conn, c.cfg, p, snap, max_functions, min_priority)
+    b = rank.write_brief(c.conn, c.cfg, p, snap, max_functions, min_priority, max_tokens)
     if b is None:
         click.echo("nothing to do", err=True)
         sys.exit(EXIT_NOTHING_TO_DO)
@@ -517,14 +519,15 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
     if (not kinds or "rank" in kinds) and not only:
         rows = [r for r in rank.unranked(c.conn, snap, rank_min_priority)
                 if area is None or r["area"] == area]
-        briefs = list(rank.batches(rows))
+        briefs = list(rank.batches(rows, size=rank.file_sizer(c.cfg.snapshot_path(p.name, sha))))
         t.add_row("rank", f"pri ≥ {rank_min_priority}", str(len(briefs)), str(len(rows)),
                   str(sum(r["end_line"] - r["start_line"] + 1 for r in rows)),
                   *est("rank", len(briefs)), briefs[0][0][0] if briefs else "")
-        details += [("rank", "", i, {"functions": sum(len(f) for _, f in b),
+        details += [("rank", "", i, {"functions": sum(len(f) for _, f, _ in b),
                                      "lines": sum(r["end_line"] - r["start_line"] + 1
-                                                  for _, f in b for r in f),
-                                     "paths": [p for p, _ in b]})
+                                                  for _, f, _ in b for r in f),
+                                     "paths": [p + (f":{ln[0]}-{ln[1]}" if ln else "")
+                                               for p, _, ln in b]})
                     for i, b in enumerate(briefs, 1)]
     for kind, lens in plan:
         runs = ledger.queue_estimate(c.conn, p, snap, kind, lens, area)

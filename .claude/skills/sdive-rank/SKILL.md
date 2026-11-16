@@ -6,7 +6,9 @@ allowed-tools: Bash, Read, Agent, SendMessage
 ---
 
 You orchestrate **rank batches**. Each batch is a brief of whole files (the
-best-scored ones whose functions have no reach judgement yet); the
+best-scored ones whose functions have no reach judgement yet), sized to an
+estimated context budget so the Haiku ranker stays in its cheap tier; a file
+too large for the budget comes in line-range pieces; the
 `sdive-ranker` subagent judges each function and `sdive` stores the
 judgements and rescores the queue. This orders work; it finds no bugs and
 records no coverage.
