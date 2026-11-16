@@ -92,8 +92,10 @@ def test_dive_record_verify(cfg, indexed):
     run3 = ledger.next_unit_run(conn, p, snap, "dive", "memory")
     assert [t["key"] for t in ledger.brief(conn, cfg, run3)["targets"]] == ["src/parser.c::parse"]
 
+    # A chosen subset limits which hypotheses are verified.
+    assert ledger.next_verify_run(conn, p, ["no-such-slug"]) is None
     # Verify brief is blind to confidence and auditor notes.
-    v = ledger.next_verify_run(conn, p)
+    v = ledger.next_verify_run(conn, p, ["parse-reads-buf-0-when-len-is-0"])
     vb = ledger.brief(conn, cfg, v)
     assert "secret reasoning" not in json.dumps(vb)
     assert "confidence" not in vb["finding"]

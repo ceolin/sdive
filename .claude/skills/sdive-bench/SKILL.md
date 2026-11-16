@@ -17,7 +17,8 @@ any agent reads the ground truth until the analysis is finished. Only the final
 name; default `bench-<truth-set>-<YYYYMMDD>`; refuse to reuse an existing
 ledger directory under `analysis/ledgers/` — rounds start clean), `--areas`
 (comma-separated; default: the whole project), `--dives` (default `all`),
-`--sweeps` (default `all`), `--parallel` (default 1, passed to each skill).
+`--sweeps` (default `all`), `--parallel` (default 1, passed to each skill),
+`--verify` (`all`, the default, or `sample`).
 
 On a tree the size of Zephyr a whole-project round costs about as much as a
 full analysis. Restrict it with `--areas`, and import the truth set with the
@@ -37,7 +38,13 @@ items; nothing about them goes into briefs.
    and the `holistic` lens, for the requested count (with `--areas`: once per
    area, `--area A`).
 4. **Verify:** follow the /sdive-verify procedure with `--ledger <round>` and
-   `all`.
+   `all`. With `--verify sample` (when hypotheses repeat heavily and
+   verifying all would cost more than the round), do step 5 first, then write
+   a slug file with every candidate match from the report plus a random
+   sample of about 40 other hypotheses (seeded, so it can be reproduced) and
+   verify with `--findings <file>`. Verifiers stay blind: their briefs are
+   unchanged. Report precision as estimated from the sample, and re-run step 5
+   after verifying.
 5. **Score:** `uv run sdive --ledger <round> bench report <project> <truth-set> --rev <rev>`.
 6. **Judge (with the user):** the report's location matches are only
    *candidates* — a finding in the same function as a truth item may be a

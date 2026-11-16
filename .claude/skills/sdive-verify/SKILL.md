@@ -11,7 +11,9 @@ puts in the brief.
 
 ## Arguments
 
-`<project>`; a count `N` (default 1) or `all`; `--ledger` (default `main`).
+`<project>`; a count `N` (default 1) or `all`; `--ledger` (default `main`);
+`--findings FILE` (only the hypotheses whose slugs FILE lists, one per line:
+pass it on to every `next` call).
 
 ## Before the loop: interrupted runs
 
@@ -25,7 +27,7 @@ result file, `uv run sdive --ledger <ledger> abandon <id>`.
 
 ## Loop
 
-1. `uv run sdive --ledger <ledger> next <project> --kind verify`
+1. `uv run sdive --ledger <ledger> next <project> --kind verify [--findings FILE]`
    - Exit status 3: no unverified hypotheses left; stop.
    - Other failure: report and stop.
 2. Dispatch the agent named in `agent` with exactly the prompt

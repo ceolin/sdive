@@ -424,18 +424,26 @@ def run_minutes(conns: list[sqlite3.Connection], project: str) -> dict[str, tupl
     return out
 
 
-def next_verify_run(conn: sqlite3.Connection, project: Project) -> int | None:
-    """Start a verify run on the oldest unleased hypothesis."""
+def next_verify_run(conn: sqlite3.Connection, project: Project,
+                    slugs: list[str] | None = None) -> int | None:
+    """Start a verify run on the oldest unleased hypothesis (among `slugs`,
+    when given: a chosen subset, e.g. a benchmark round's sample)."""
+    params: dict = {"project": project.name, "cutoff": _lease_cutoff()}
+    only = ""
+    if slugs:
+        marks = ", ".join(f":s{i}" for i in range(len(slugs)))
+        only = f"AND f.slug IN ({marks})"
+        params |= {f"s{i}": s for i, s in enumerate(slugs)}
     row = conn.execute(
-        """
+        f"""
         SELECT f.id, f.snapshot_id FROM findings f
-        WHERE f.project = :project AND f.status = 'hypothesis'
+        WHERE f.project = :project AND f.status = 'hypothesis' {only}
           AND NOT EXISTS (
               SELECT 1 FROM run_targets t JOIN runs r ON r.id = t.run_id
               WHERE t.finding_id = f.id AND r.status = 'started' AND r.started_at > :cutoff)
         ORDER BY f.created_at, f.id LIMIT 1
         """,
-        {"project": project.name, "cutoff": _lease_cutoff()},
+        params,
     ).fetchone()
     if row is None:
         return None

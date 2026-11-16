@@ -165,7 +165,7 @@ before trusting a lens or prompt change on current code.
 | Step | What it does |
 |---|---|
 | `sdive bench import <p> <corpus>... --name <set> [--at REV] [--paths GLOB] [--areas A,B] [--unchanged]` | Imports ground truth from zepsec-style analysis directories into `analysis/truth/<p>/<set>.json`. Disclosure corpora (MCUboot's) carry their own sites. Silent-fix corpora (Zephyr's: `result.json` naming the fix commit `sha`, `affected_components`, `affected_functions`) need `--at REV`: only items fixed after REV whose affected function exists at REV are kept, sited at that function; `--paths` and `--areas` narrow by site (e.g. net and Bluetooth, or the areas a round will cover); `--unchanged` keeps only items whose affected functions are identical at REV and at the fix's base (`fix_base` in `result.json`, else the fix's parent), so the bug was certainly live at REV. A corpus can also be built from a project's public fixes: one directory per advisory with `result.json` giving the fix commit and the functions its diff touches. |
-| `/sdive-bench <p> <set> --rev <commit> [--areas A,B] [--parallel P]` | Creates a fresh ledger (`bench-<set>-<date>`), runs sweeps and dives at `<commit>` (only in `--areas` when given: on Zephyr a whole-tree round costs as much as a full analysis), verifies every hypothesis, then scores. |
+| `/sdive-bench <p> <set> --rev <commit> [--areas A,B] [--parallel P]` | Creates a fresh ledger (`bench-<set>-<date>`), runs sweeps and dives at `<commit>` (only in `--areas` when given: on Zephyr a whole-tree round costs as much as a full analysis), verifies every hypothesis, then scores. With `--verify sample`, it scores first and verifies only the candidate matches plus a random sample of the rest (cheaper when hypotheses repeat; precision is then estimated from the sample). |
 | `sdive --ledger <round> bench report <p> <set> --rev <commit>` | Scores the round: location matches against truth items are only *candidates*. |
 | `sdive --ledger <round> bench judge <p> <set> <item> <slug>...` | Records, by human judgement, which findings really raise each truth item (`adjudication.json`). |
 | `sdive carry <p> --from <round>` | Copies the round's verified findings into the main ledger as hypotheses at `main`, with locations remapped, so ordinary verification shows which are still live. |
@@ -210,7 +210,7 @@ applies everywhere (MCUboot's lenses).
 | `sdive run <p> [auto\|sweep\|dive\|verify] [LENS] [--minutes M \| --runs N] [--parallel P]` | Launches a headless Claude session on the matching skill. `auto` runs verify first, then the next lens in `sweep_order` with work left, then dives. Progress streams to the terminal; the log and reported cost go to the ledger's `sessions/`. `-i` opens an interactive session instead; `--dry-run` prints the command. |
 | `/sdive-sweep <p> <lens\|all> [N\|all] [--minutes M]` | The sweep skill, run interactively. |
 | `/sdive-dive <p> [N\|all] [--minutes M]` | The dive skill. |
-| `/sdive-verify <p> [N\|all] [--minutes M]` | The verify skill. |
+| `/sdive-verify <p> [N\|all] [--minutes M] [--findings FILE]` | The verify skill; `--findings` limits it to the slugs listed in FILE. |
 | `sdive coverage <p> [--lens L] [--by-lens] [--min-priority K]` | Per-area function coverage at the snapshot (current content hashes only: changed code loses its coverage). `--lens` counts only where that lens applies; `--by-lens` gives the area × lens matrix of covered/applicable functions (holistic = dives). |
 | `sdive findings <p> [--status S]` | Lists findings. `sdive finding show <slug>` gives one, with locations and history, as JSON. |
 | `sdive upstream <p>` | Suspected defects noted in external (reference) components. |
@@ -219,7 +219,8 @@ applies everywhere (MCUboot's lenses).
 The skills use the low-level commands, which can also be used by hand:
 
 - `sdive next <p> --kind K --lens L` starts a run, leases its targets for 12
-  hours, and prints the brief.
+  hours, and prints the brief. With `--kind verify --findings FILE` it takes
+  only the hypotheses whose slugs FILE lists (a chosen subset).
 - `sdive brief <run>` reprints the brief.
 - The agent writes its result JSON to the ledger's staging directory.
   `sdive schema audit|verify` prints the result schema.

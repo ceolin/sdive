@@ -436,16 +436,25 @@ def rank_rescore(c: Ctx, project: str, rev: str | None) -> None:
 @click.option("--max-lines", type=int,
               help=f"Batch line budget (default: dive {ledger.DIVE_MAX_LINES}, "
                    f"sweep {ledger.SWEEP_MAX_LINES}).")
+@click.option("--findings", "findings_file", type=click.Path(exists=True, path_type=Path),
+              help="Verify: only hypotheses whose slugs are listed in this file, one per line.")
 @pass_ctx
 def next_(c: Ctx, project: str, kind: str, lens: str | None, rev: str | None,
-          area: str | None, max_units: int, max_lines: int | None) -> None:
+          area: str | None, max_units: int, max_lines: int | None,
+          findings_file: Path | None) -> None:
     """Start a run on the next piece of work and print its brief as JSON.
 
     Exits with status 3 when there is nothing left to do.
     """
     p = c.project(project)
+    if findings_file and kind != "verify":
+        raise click.UsageError("--findings is only for --kind verify")
     if kind == "verify":
-        run_id = ledger.next_verify_run(c.conn, p)
+        slugs = ([s.strip() for s in findings_file.read_text().splitlines() if s.strip()]
+                 if findings_file else None)
+        if findings_file and not slugs:
+            raise click.UsageError(f"no slugs in {findings_file}")
+        run_id = ledger.next_verify_run(c.conn, p, slugs)
     else:
         if not lens:
             raise click.UsageError(f"--lens is required for --kind {kind}")
