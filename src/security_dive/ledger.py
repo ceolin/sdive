@@ -69,9 +69,11 @@ def indexed_snapshot(conn: sqlite3.Connection, project: str, sha: str) -> int:
 
 
 def index_units(conn: sqlite3.Connection, project: str, snap: int, units: list[Unit],
-                conditions: dict[str, list[str]] | None = None) -> None:
+                conditions: dict[str, list[str]] | None = None) -> int:
     """Replace the snapshot's unit_versions with `units` (coverage is
-    unaffected), and its file conditions with `conditions` when given."""
+    unaffected), and its file conditions with `conditions` when given.
+    Reach judgements carry from earlier snapshots to unchanged functions;
+    returns how many were carried."""
     with conn:
         if conditions is not None:
             conn.execute("DELETE FROM file_conditions WHERE snapshot_id = ?", (snap,))
@@ -94,7 +96,9 @@ def index_units(conn: sqlite3.Connection, project: str, snap: int, units: list[U
                  u.signals),
             )
         conn.execute("UPDATE snapshots SET indexed_at = ? WHERE id = ?", (now(), snap))
+    carried = rank.carry_reach(conn, snap)
     rank.rescore(conn, snap)
+    return carried
 
 
 # --- lenses ----------------------------------------------------------------

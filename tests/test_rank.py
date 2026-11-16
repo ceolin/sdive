@@ -104,3 +104,40 @@ def test_batches_context_budget(tmp_path):
         [("s1.c", None)], [("s2.c", None)]]
     # With the default budget the small files share a brief.
     assert [[p for p, _, _ in b] for b in rank.batches(small, size=size)] == [["s1.c", "s2.c"]]
+
+
+def test_reach_carries_to_unchanged_functions(cfg, indexed, upstream):  # noqa: F811
+    from security_dive import ledger, repo
+    from security_dive.units import extract_tree
+
+    from .conftest import git
+    p, conn, snap, _sha, _tree = indexed
+    b = rank.write_brief(conn, cfg, p, snap)
+    keys = [fn["key"] for f in b["files"] for fn in f["functions"]]
+    assert "src/util.c::helper" in keys
+    with open(b["result_path"], "w") as f:
+        json.dump({"brief_id": b["brief_id"], "model": "m", "units": [
+            {"key": k, "reach": 3, "attacker": "A1", "reason": "x"} for k in keys]}, f)
+    rank.record(conn, cfg, b["brief_id"])
+
+    # Change only util.c upstream: helper needs ranking again, parser.c doesn't.
+    (upstream / "src" / "util.c").write_text("int helper(void)\n{\n    return 2;\n}\n")
+    git(upstream, "-c", "user.name=t", "-c", "user.email=t@example.com",
+        "commit", "-q", "-am", "change helper")
+    repo.ensure_mirror(cfg, p)
+    sha2 = repo.resolve(cfg, p, "main")
+    snap2 = ledger.snapshot_id(conn, p.name, sha2, "main")
+    tree2 = repo.snapshot(cfg, p, sha2)
+    assert ledger.index_units(conn, p.name, snap2, extract_tree(p, tree2)) == len(keys) - 1
+    assert [r["key"] for r in rank.unranked(conn, snap2)] == ["src/util.c::helper"]
+    row = conn.execute(
+        "SELECT reach, carried_from FROM unit_reach r JOIN units u ON u.id = r.unit_id "
+        "WHERE r.snapshot_id = ? AND u.key = 'src/parser.c::parse'", (snap2,)).fetchone()
+    assert tuple(row) == (3, snap)
+    # Carried reach counts in the score; re-indexing doesn't carry twice.
+    s1, s2 = (conn.execute(
+        "SELECT uv.score FROM unit_versions uv JOIN units u ON u.id = uv.unit_id "
+        "WHERE uv.snapshot_id = ? AND u.key = 'src/parser.c::parse'", (s,)).fetchone()[0]
+        for s in (snap, snap2))
+    assert s1 == s2
+    assert ledger.index_units(conn, p.name, snap2, extract_tree(p, tree2)) == 0

@@ -399,7 +399,9 @@ In order:
    `sdive-ranker` subagent on Haiku, file by file, 0–3 → −2 … +1.5; briefs
    are sized to an estimated 80K-token context, since Haiku costs about a
    twentieth of Sonnet below 100K, and files too large for that come in
-   line-range pieces),
+   line-range pieces; a judgement carries to later snapshots while the
+   function's content is unchanged, so following `main` re-ranks only
+   what changed),
    minus 1.5 for code no recorded build compiles once builds exist. Mythos
    time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
    LwM2M/CoAP/MQTT, Bluetooth host + controller, USB device and host

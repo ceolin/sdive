@@ -277,6 +277,12 @@ MIGRATIONS: list[str] = [
         recorded_at  TEXT NOT NULL
     );
     """,
+    # v10: reach judgements carry to later snapshots where the function's
+    # content is unchanged; carried_from names the snapshot judged.
+    """
+    ALTER TABLE unit_reach ADD COLUMN carried_from INTEGER REFERENCES snapshots(id);
+    CREATE INDEX unit_reach_unit ON unit_reach(unit_id);
+    """,
 ]
 
 

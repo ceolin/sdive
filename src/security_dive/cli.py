@@ -157,7 +157,10 @@ def units(c: Ctx, project: str, rev: str | None, show: bool) -> None:
     found = extract_tree(p, tree)
     snap = ledger.snapshot_id(c.conn, p.name, sha, ref)
     conditions = kconfig.file_conditions(tree) if p.kconfig_map else None
-    ledger.index_units(c.conn, p.name, snap, found, conditions)
+    carried = ledger.index_units(c.conn, p.name, snap, found, conditions)
+    if carried:
+        click.echo(f"carried {carried} reach judgements from earlier snapshots "
+                   "(unchanged functions)", err=True)
 
     if show:
         for u in found:

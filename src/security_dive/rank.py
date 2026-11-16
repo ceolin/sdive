@@ -87,6 +87,29 @@ def score(priority: int, sig: dict[str, int], built: bool | None, reach: int | N
     return round(s, 3)
 
 
+def carry_reach(conn: sqlite3.Connection, snap: int) -> int:
+    """Copy into `snap` the latest reach judgement of each function whose
+    content is unchanged from a snapshot where it was judged (or carried),
+    unless `snap` already has one. Returns the number carried."""
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO unit_reach (snapshot_id, unit_id, reach, attacker, reason, model,
+                                       created_at, carried_from)
+               SELECT uv.snapshot_id, r.unit_id, r.reach, r.attacker, r.reason, r.model,
+                      r.created_at, coalesce(r.carried_from, r.snapshot_id)
+               FROM unit_versions uv JOIN unit_reach r ON r.id = (
+                   SELECT max(r2.id) FROM unit_reach r2
+                   JOIN unit_versions o ON o.snapshot_id = r2.snapshot_id
+                                       AND o.unit_id = r2.unit_id
+                   WHERE r2.unit_id = uv.unit_id AND r2.snapshot_id != uv.snapshot_id
+                     AND o.content_hash = uv.content_hash)
+               WHERE uv.snapshot_id = ?
+                 AND NOT EXISTS (SELECT 1 FROM unit_reach x
+                                 WHERE x.snapshot_id = uv.snapshot_id
+                                   AND x.unit_id = uv.unit_id)""", (snap,))
+    return cur.rowcount
+
+
 def rescore(conn: sqlite3.Connection, snap: int) -> int:
     """Recompute every unit's score in `snap` from its priority, signals,
     the snapshot's recorded builds (if any) and recorded reach. Returns the
