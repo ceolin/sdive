@@ -13,6 +13,11 @@ too large for the budget comes in line-range pieces; the
 judgements and rescores the queue. This orders work; it finds no bugs and
 records no coverage.
 
+For hundreds of briefs, suggest `uv run sdive rank run <project> all --parallel 4`
+instead: the same loop with no orchestrating model (each brief is a headless
+`claude -p --agent sdive-ranker` session), so the cost is the ranker's alone.
+This skill suits a few briefs, or watching the ranker's judgements.
+
 ## Arguments
 
 `<project>`; a batch count `N` (default 1) or `all`; `--parallel P` (default

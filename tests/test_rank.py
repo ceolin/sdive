@@ -143,3 +143,36 @@ def test_reach_carries_to_unchanged_functions(cfg, indexed, upstream):  # noqa: 
         for s in (snap, snap2))
     assert s1 == s2
     assert ledger.index_units(conn, p.name, snap2, extract_tree(p, tree2)) == 0
+
+
+def test_rank_loop_records_and_retries(cfg, indexed):  # noqa: F811
+    import io
+
+    from security_dive import launch
+    p, conn, snap, _sha, _tree = indexed
+    calls = []
+
+    def fake_agent(argv, env, cwd, log_path):
+        calls.append(argv)
+        prompt = argv[-1]
+        if prompt.startswith("Brief: "):
+            b = json.load(open(prompt.removeprefix("Brief: ")))
+            keys = [fn["key"] for f in b["files"] for fn in f["functions"]]
+            if "src/util.c::helper" in keys:  # first try leaves a unit out
+                keys = keys[1:]
+        else:
+            assert "--resume" in argv and "no judgement" in prompt
+            b = json.load(open(next(f for f in cfg.staging.glob("rank-*.brief.json"))))
+            keys = [fn["key"] for f in b["files"] for fn in f["functions"]]
+        with open(b["result_path"], "w") as f:
+            json.dump({"brief_id": b["brief_id"], "model": "m", "units": [
+                {"key": k, "reach": 1, "attacker": "A1", "reason": "x"} for k in keys]}, f)
+        return {"session_id": "s1", "total_cost_usd": 0.01, "is_error": False}
+
+    out = io.StringIO()
+    t = launch.rank_loop(conn, cfg, p, snap, None, 1, 0, {}, agent_runner=fake_agent, out=out)
+    assert t["briefs"] == 1 and t["failed"] == 0 and t["cost"] == pytest.approx(0.02)
+    assert "after retry" in out.getvalue()
+    assert calls[0][:4] == ["claude", "-p", "--agent", "sdive-ranker"]
+    assert rank.unranked(conn, snap) == []
+    assert not list(cfg.staging.glob("rank-*.brief.json"))

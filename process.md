@@ -20,7 +20,7 @@ sdive areas <p> [--generate REV]
     (large projects: order the queue before deep work)
 sdive build <p> [--only GLOB]
 sdive builds <p>
-/sdive-rank <p> [N|all] --min-priority 4
+sdive rank run <p> [N|all] --parallel 4    (or /sdive-rank interactively)
 sdive rank show <p>
 
 # 2. Calibrate (optional; blind benchmark at a commit with known answers)
@@ -154,9 +154,10 @@ new and changed functions.
 | `sdive build <p> [REV] [--only GLOB] [-j N] [--redo] [--list]` | Configures (CMake only, never compiles) the builds in `projects/<p>/builds.toml` at the snapshot and records which sources each compiles, from `compile_commands.json` (~8 s a build). Hand-written wide builds (`[[build]]`) plus suites (`[[suite]]`: every `testcase.yaml`/`sample.yaml`/`tests.yaml` scenario under a directory, on its first usable platform, or the default board when it lists only native/bsim hosts). Runs in a west workspace under `work/west/<p>/` (the project checked out from the mirror, modules at its `west.yml`, cloned with the user's workspace as `--path-cache` only); the Python env and SDK come from `[projects.<p>.build]` in `config.toml`, used read-only. Already recorded builds are skipped unless `--redo`. |
 | `sdive builds <p> [--failed]` | Builds ok/failed and in-scope `.c` files no build compiles, per priority; `--failed` shows the end of each failed log. |
 | `/sdive-rank <p> [N\|all] [--parallel P] [--min-priority K]` | Hands batches of whole files (best-scored first, functions with no judgement yet) to `sdive-ranker` (a Haiku subagent, blind like the others), each brief sized to an estimated 80K-token context so Haiku stays under its 100K price tier (a larger file is split into line-range pieces), then records the judgements and rescores. Default `--min-priority 4`: rank where the deep work will go. |
+| `sdive rank run <p> [N\|all] [--parallel P] [--min-priority K] [--model M] [--dry-run]` | The same work headless and with no orchestrating model, for the bulk of a large tree: each brief is one `claude -p --agent sdive-ranker` session on the agent's own model (Haiku), with the session's writes limited to staging and the benchmark-blind paths denied. Briefs are written and results recorded as they finish; a rejected result is sent back to its session once (`--resume`), otherwise the brief is dropped. It stops handing out briefs when a session fails (e.g. a usage limit), records leftover briefs from an interrupted run first, and logs each session's reported cost under `sessions/rank/`. Use it rather than `/sdive-rank` for hundreds of briefs: an interactive orchestrator re-reads every hand-back and costs more than the ranking. |
 | `sdive rank show <p> [--top N] [--files] [--area A]` | The queue order: units (or files) by score, with reach and signals. |
 | `sdive rank status <p>` | Judgements recorded and left per priority; recorded builds. `sdive todo <p> --kind rank` counts the briefs left and their agent-minutes. |
-| `sdive rank brief <p>` / `sdive rank record <id>` | What the skill runs: write a rank brief to staging (it leases its functions until recorded; `--max-tokens` sets the context budget); validate and store a result (`sdive schema rank`; reasons over 200 characters are shortened rather than rejected). |
+| `sdive rank brief <p>` / `sdive rank record <id>` | What the skill and `rank run` run: write a rank brief to staging (it leases its functions until recorded; `--max-tokens` sets the context budget); validate and store a result (`sdive schema rank`; reasons over 200 characters are shortened rather than rejected). |
 | `sdive rank rescore <p>` | Recompute scores (`sdive units` also does). |
 
 ## 2. Calibrate (optional)

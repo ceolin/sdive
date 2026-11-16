@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections import defaultdict
@@ -403,6 +404,40 @@ def rank_brief(c: Ctx, project: str, rev: str | None, max_functions: int,
         click.echo("nothing to do", err=True)
         sys.exit(EXIT_NOTHING_TO_DO)
     _emit_json(b)
+
+
+@rank_grp.command("run")
+@click.argument("project")
+@click.argument("count", default="1")
+@click.option("--parallel", default=1, type=click.IntRange(1, 8), show_default=True)
+@click.option("--min-priority", default=4, show_default=True,
+              help="Only areas at this priority or above.")
+@click.option("--rev", help="Snapshot revision (default: the default branch).")
+@click.option("--model", default=None, help="Override the ranker agent's own model.")
+@click.option("--keep-api-key", is_flag=True,
+              help="Pass ANTHROPIC_API_KEY through (bills the API, not the plan).")
+@click.option("--dry-run", is_flag=True, help="Print the claude command for one brief.")
+@pass_ctx
+def rank_run(c: Ctx, project: str, count: str, parallel: int, min_priority: int,
+             rev: str | None, model: str | None, keep_api_key: bool, dry_run: bool) -> None:
+    """Rank COUNT briefs (or 'all') headless, with no orchestrating model: each
+    brief is one `claude -p --agent sdive-ranker` session; results are recorded
+    as they finish, a rejected result is sent back to its session once, and
+    each session's reported cost is logged under sessions/rank/."""
+    p = c.project(project)
+    _sha, snap = _snapshot_for(c, p, rev)
+    if dry_run:
+        argv = launch.agent_command("sdive-ranker", "Brief: <brief_path>", c.cfg.staging, model)
+        click.echo(shlex.join(argv))
+        return
+    if count != "all" and not count.isdigit():
+        raise click.BadParameter("a number or 'all'", param_hint="COUNT")
+    launch.recover_rank_briefs(c.conn, c.cfg)
+    t = launch.rank_loop(c.conn, c.cfg, p, snap, None if count == "all" else int(count),
+                         parallel, min_priority, launch.child_env(keep_api_key), model)
+    cut = f", {t['shortened']} reasons shortened" if t["shortened"] else ""
+    click.echo(f"\nranked {t['briefs']} briefs ({t['functions']} functions), "
+               f"{t['failed']} failed{cut}; reported cost ${t['cost']:.2f}")
 
 
 @rank_grp.command("record")

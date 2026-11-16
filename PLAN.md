@@ -401,7 +401,9 @@ In order:
    twentieth of Sonnet below 100K, and files too large for that come in
    line-range pieces; a judgement carries to later snapshots while the
    function's content is unchanged, so following `main` re-ranks only
-   what changed),
+   what changed; `sdive rank run` drives the ranker headless with no
+   orchestrating model, since handing out and recording briefs needs no
+   judgement),
    minus 1.5 for code no recorded build compiles once builds exist. Mythos
    time goes to the top of the queue. Priority surfaces: IP/TCP/DNS,
    LwM2M/CoAP/MQTT, Bluetooth host + controller, USB device and host
