@@ -35,6 +35,12 @@ that priority order (so `1` is the most severe cluster still to do). If none
 are named and there is no count, tell the user how many are in each state and
 propose a batch (about six) before starting.
 
+If a named slug is not in the list, check `uv run sdive clusters <project>`:
+it may be a finding in no cluster, or a cluster with no track. Either way
+there is nothing to write up yet; say which, and point the user to
+`/sdive-triage <project>` (don't create clusters or tracks from here). If the
+list is empty, say so the same way rather than reporting "nothing to do".
+
 ## Draft
 
 1. `uv run sdive writeup brief <cluster>` (add `--feedback "<what to change>"`

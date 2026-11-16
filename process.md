@@ -313,6 +313,12 @@ a local export for zepsec. **How to run it:** `/sdive-writeup <p>` in an
 interactive session, naming clusters or a count, or with neither to be offered
 a batch. `sdive writeups <p>` shows where every tracked cluster stands.
 
+Only clusters with a track appear here. A verified finding that is in no
+cluster, or whose cluster has no track yet, has nothing to write up: run
+`/sdive-triage <p>` first (`sdive clusters <p>` lists findings in no cluster).
+Write-ups take cluster slugs, not finding slugs, though a one-finding cluster
+often has the same name.
+
 1. **Draft.** `sdive writeup brief <cluster>` writes a brief for the
    `sdive-writer` subagent, which is blind like the analysis agents. The brief
    holds the cluster (its rationale is the one fix; its track note is the
