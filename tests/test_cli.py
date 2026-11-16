@@ -83,3 +83,14 @@ def test_run_auto_ranks_first_then_splits_minutes(root, monkeypatch):
     # Everything ranked now: a second auto run goes straight to work.
     r = run(main, ["run", "demo", "--runs", "1"])
     assert r.exit_code == 0 and len(ranked) == 1 and len(prompts) == 3
+
+
+def test_clusters_and_writeups_when_none(root, monkeypatch):
+    monkeypatch.chdir(root)
+    run = CliRunner().invoke
+    r = run(main, ["clusters", "demo"])
+    assert r.exit_code == 0, r.output
+    assert "no clusters in demo yet" in r.output and "┏" not in r.output
+    r = run(main, ["writeups", "demo"])
+    assert r.exit_code == 0, r.output
+    assert "no tracked clusters in demo" in r.output and "┏" not in r.output

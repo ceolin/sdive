@@ -1106,14 +1106,18 @@ def clusters(c: Ctx, project: str) -> None:
             triage.combine([x["scope"] for x in m]) or "unscoped",
             "..".join(dict.fromkeys([since[0], since[-1]])) if since else "",
             ",".join(sorted({x["property"] or "?" for x in m})), r["title"]))
-    console.print(_titled_table(("cluster", "n", "track", "scope", "since", "props"),
-                                table_rows))
+    if table_rows:
+        console.print(_titled_table(("cluster", "n", "track", "scope", "since", "props"),
+                                    table_rows))
+    else:
+        click.echo(f"no clusters in {project} yet")
     loose = triage.unclustered(c.conn, project)
     if loose:
-        console.print(f"\n{len(loose)} verified findings in no cluster:")
-        for f in loose:
-            console.print(f"  {f['slug']}  [dim]{f['property'] or ''} {f['attacker'] or ''} "
-                          f"{f['title'][:90]}[/dim]")
+        click.echo(f"\n{len(loose)} verified findings in no cluster (/sdive-triage {project}):")
+        console.print(_titled_table(
+            ("finding", "prop", "atk"),
+            [(f["slug"], f["property"] or "", f["attacker"] or "", f["title"])
+             for f in loose]))
 
 
 @main.command("triage")
@@ -1428,6 +1432,10 @@ def writeups(c: Ctx, project: str, as_json: bool) -> None:
     rows = writeup.status(c.conn, project)
     if as_json:
         _emit_json(rows)
+        return
+    if not rows:
+        click.echo(f"no tracked clusters in {project}: triage clusters findings and "
+                   f"records their track first (sdive triage {project})")
         return
     console.print(_titled_table(
         ("#", "cluster", "score", "atk", "track", "n", "state", "version", "exported",
