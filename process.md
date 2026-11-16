@@ -98,7 +98,7 @@ flowchart TD
 |---|---|
 | `sdive init` | Creates `analysis/` (private, its own nested git repo, never published) and `work/` (disposable), and the main ledger `analysis/sdive.db`. |
 | `sdive mirror <p>` | Creates or fetches the project's bare mirror in `work/mirrors/`, using the user's checkout only as a `--reference`. Fetches branches and tags. Run it again before analysing new commits or scoping against a new release. |
-| `sdive units <p> [REV]` | Exports a read-only snapshot of REV (default: the default branch) to `work/snapshots/<p>/<sha>/` and indexes its files and functions by area (tree-sitter); reach judgements from earlier snapshots carry to unchanged functions. `sdive snapshot` only exports. |
+| `sdive units <p> [REV]` | Exports a read-only snapshot of REV (default: the default branch) to `work/snapshots/<p>/<sha>/` and indexes its files and functions by area (tree-sitter); reach judgements from earlier snapshots carry to unchanged functions. Agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.claude/`) are left out of snapshots so they never reach the agents. `sdive snapshot` only exports. |
 | `sdive areas <p> [--generate REV]` | Lists the project's areas with priority and source (hand-written, generated, default). `--generate` rewrites the generated areas file from the project's `MAINTAINERS.yml` at REV (Zephyr); priorities stay in `project.toml`, so regenerating loses no decisions. Re-run `sdive units` afterwards. |
 | `sdive lenses <p>` | Lists lenses and their content hashes. Editing a lens makes a new version, and coverage under the old version no longer counts for it. |
 

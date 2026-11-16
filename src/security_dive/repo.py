@@ -27,6 +27,19 @@ from .config import Config, Project, Reference
 
 MARKER = ".sdive-snapshot.json"
 
+# Instruction files for coding agents. Claude Code loads these into the
+# context of any agent that reads files beside or below them, so a tree that
+# ships them would put its committers' text into our auditors' prompts.
+# Snapshots leave them out (in the project and every reference).
+AGENT_FILES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"})
+AGENT_DIRS = frozenset({".claude"})
+
+
+def is_agent_file(name: str) -> bool:
+    """Whether an archive path is (or lies under) an agent instruction file."""
+    parts = name.rstrip("/").split("/")
+    return parts[-1] in AGENT_FILES or any(part in AGENT_DIRS for part in parts)
+
 
 class GitError(Exception):
     pass
@@ -171,8 +184,10 @@ def ensure_submodule_mirror(
 # --- snapshots ---------------------------------------------------------------
 
 
-def _export(git_dir: Path, sha: str, dest: Path, paths: tuple[str, ...] = ()) -> None:
-    """`git archive` `sha` (optionally only `paths`) and extract it under `dest`."""
+def _export(git_dir: Path, sha: str, dest: Path, paths: tuple[str, ...] = (),
+            skipped: list[Path] | None = None) -> None:
+    """`git archive` `sha` (optionally only `paths`) and extract it under
+    `dest`, leaving out agent instruction files (appended to `skipped`)."""
     if paths:
         present = [p for p in paths if git("-C", git_dir, "ls-tree", "--name-only", sha, "--", p)]
         if not present:
@@ -186,7 +201,12 @@ def _export(git_dir: Path, sha: str, dest: Path, paths: tuple[str, ...] = ()) ->
     )
     assert proc.stdout is not None
     with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
-        tf.extractall(dest, filter="data")
+        for member in tf:
+            if is_agent_file(member.name):
+                if skipped is not None and not member.isdir():
+                    skipped.append(dest / member.name)
+                continue
+            tf.extract(member, dest, filter="data")
     err = proc.stderr.read().decode() if proc.stderr else ""
     if proc.wait() != 0:
         raise GitError(f"git archive {sha} failed: {err.strip()}")
@@ -204,6 +224,7 @@ def _export_references(
     tree: Path,
     out: list[dict],
     absent: list[str],
+    skipped: list[Path] | None = None,
 ) -> None:
     mods = submodules(parent_git, parent_sha)
     for ref in refs:
@@ -220,12 +241,12 @@ def _export_references(
         local = parent_local / "modules" / sm.name if parent_local else None
         local = local if local is not None and local.is_dir() else None
         mirror = ensure_submodule_mirror(cfg, project, url, sha, local)
-        _export(mirror, sha, tree / full, ref.export)
+        _export(mirror, sha, tree / full, ref.export, skipped)
         out.append({"path": full, "name": sm.name, "url": url, "sha": sha,
                     "role": ref.role, "export": list(ref.export)})
         if ref.nested:
             _export_references(cfg, project, ref.nested, mirror, sha, url, local,
-                               full + "/", tree, out, absent)
+                               full + "/", tree, out, absent, skipped)
 
 
 # --- west projects ------------------------------------------------------------
@@ -265,7 +286,7 @@ def west_projects(git_dir: Path, sha: str) -> dict[str, WestProject]:
 
 def _export_west_references(
     cfg: Config, project: Project, refs: list[Reference], mirror: Path, sha: str,
-    tree: Path, out: list[dict], absent: list[str],
+    tree: Path, out: list[dict], absent: list[str], skipped: list[Path] | None = None,
 ) -> None:
     projects = west_projects(mirror, sha)
     # The user's west workspace (parent of the zephyr checkout) as --reference only.
@@ -278,14 +299,15 @@ def _export_west_references(
         local = workspace / wp.path if workspace is not None else None
         sub = ensure_submodule_mirror(cfg, project, wp.url, wp.revision, local)
         rev = git("-C", sub, "rev-parse", f"{wp.revision}^{{commit}}")
-        _export(sub, rev, tree / ref.path, ref.export)
+        _export(sub, rev, tree / ref.path, ref.export, skipped)
         out.append({"path": ref.path, "name": wp.name, "url": wp.url, "sha": rev,
                     "role": ref.role, "export": list(ref.export), "west_path": wp.path})
 
 
 def _layout(project: Project) -> str:
     """Fingerprint of everything besides the commit that shapes a snapshot."""
-    spec = json.dumps([r.as_dict() for r in project.references], sort_keys=True)
+    spec = json.dumps([[r.as_dict() for r in project.references],
+                       sorted(AGENT_FILES | AGENT_DIRS)], sort_keys=True)
     return hashlib.sha256(spec.encode()).hexdigest()[:16]
 
 
@@ -317,14 +339,15 @@ def snapshot(cfg: Config, project: Project, sha: str) -> Path:
     if tmp.exists():
         shutil.rmtree(tmp)
     try:
-        _export(mirror, sha, tmp)
+        skipped: list[Path] = []
+        _export(mirror, sha, tmp, skipped=skipped)
         refs: list[dict] = []
         absent: list[str] = []
         subs = tuple(r for r in project.references if r.west is None)
         _export_references(cfg, project, subs, mirror, sha, project.upstream,
-                           _git_dir_of(project.reference_repo), "", tmp, refs, absent)
+                           _git_dir_of(project.reference_repo), "", tmp, refs, absent, skipped)
         _export_west_references(cfg, project, [r for r in project.references if r.west],
-                                mirror, sha, tmp, refs, absent)
+                                mirror, sha, tmp, refs, absent, skipped)
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -334,8 +357,10 @@ def snapshot(cfg: Config, project: Project, sha: str) -> Path:
         "layout": layout,
         "references": refs,
         "absent_references": absent,
+        "agent_files_left_out": sorted(str(f.relative_to(tmp)) for f in skipped),
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "note": "git archive export; only listed reference submodules are included",
+        "note": "git archive export; only listed reference submodules are included; "
+                "agent instruction files (CLAUDE.md, AGENTS.md, .claude/) are left out",
     }
     (tmp / MARKER).write_text(json.dumps(marker, indent=2) + "\n")
     _make_read_only(tmp)

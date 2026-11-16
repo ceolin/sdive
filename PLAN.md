@@ -155,7 +155,11 @@ Notes from building it:
   order. Function hashes cover the original lines, so a change in any branch
   invalidates the unit.
 - **Snapshots** are `git archive` exports. Submodules are included only when
-  listed as reference trees (below).
+  listed as reference trees (below). Agent instruction files (`CLAUDE.md`,
+  `CLAUDE.local.md`, `AGENTS.md`, `.claude/`) are left out, project and
+  references alike: Claude Code loads them into any agent reading files
+  beside them, which would let the tree's committers steer our auditors and
+  costs tokens every run. The snapshot marker lists what was left out.
 - **Batching**: a dive run takes the uncovered functions of one file
   (highest priority first, capped at 40 functions / 600 lines); a sweep takes
   whole areas in priority order up to ~3000 lines (one area at least). Runs are

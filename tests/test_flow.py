@@ -32,6 +32,17 @@ def test_snapshot_is_read_only_and_idempotent(cfg, indexed):
     assert repo.snapshot(cfg, p, sha) == tree
 
 
+def test_snapshot_leaves_out_agent_instruction_files(indexed):
+    _p, _conn, _snap, _sha, tree = indexed
+    assert not (tree / "CLAUDE.md").exists()
+    assert not (tree / "src" / "AGENTS.md").exists()
+    assert not (tree / ".claude").exists()
+    assert not (tree / "ext" / "lib" / "library" / "CLAUDE.md").exists()
+    assert (tree / "ext" / "lib" / "library" / "lib.c").is_file()
+    assert repo.read_marker(tree)["agent_files_left_out"] == [
+        ".claude/skills/x/SKILL.md", "CLAUDE.md", "ext/lib/library/CLAUDE.md", "src/AGENTS.md"]
+
+
 def audit(run_id, units, hypotheses=(), dossier=()):
     return {
         "run_id": run_id,
