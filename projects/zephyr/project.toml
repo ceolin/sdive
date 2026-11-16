@@ -9,6 +9,8 @@
 
 [runs]
 sweep_order = ["memory-safety", "syscall-boundary", "protocol-state", "lifetime", "protocol-security"]
+# Share of agent-minutes `sdive run` auto gives sweeps (the rest: dives).
+sweep_share = 0.5
 
 [scope]
 include = [

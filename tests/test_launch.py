@@ -17,6 +17,26 @@ def test_choose_auto_order():
     assert launch.choose("dive", None, 5, runs, order).kind == "dive"
 
 
+def test_choose_auto_shares_time_between_sweeps_and_dives():
+    runs = {"memory-safety": 4, "authenticity": 3}.get
+    order = ["memory-safety", "authenticity"]
+
+    def pick(spent, share=0.5, dive_left=lambda: True):
+        p = launch.choose(None, None, 0, runs, order, spent, share, dive_left)
+        return p and (p.kind, p.lens)
+
+    assert pick({}) == ("sweep", "memory-safety")
+    assert pick({("sweep", "memory-safety"): 30}) == ("dive", None)
+    # the least-swept lens with work left goes next
+    assert pick({("sweep", "memory-safety"): 30, ("dive", "holistic"): 40}) == (
+        "sweep", "authenticity")
+    assert pick({("sweep", "memory-safety"): 30, ("dive", "holistic"): 40},
+                share=0.25) == ("dive", None)
+    assert pick({("sweep", "memory-safety"): 30}, dive_left=lambda: False) == (
+        "sweep", "authenticity")
+    assert launch.choose(None, None, 0, lambda n: 0, order, {}, 0.5, lambda: False) is None
+
+
 def test_invocation_and_command(tmp_path):
     sweep = launch.Plan("sweep", "authenticity", "")
     assert launch.invocation(sweep, "mcuboot", "main", None, 40, 2) == (

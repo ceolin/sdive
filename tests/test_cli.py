@@ -48,3 +48,38 @@ def test_todo_minutes_and_kind(root, monkeypatch):
     # Two dive runs (one per file) at the 3-minute default: one fits in 4 minutes.
     row = next(line for line in r.output.splitlines() if "holistic" in line)
     assert [c.strip() for c in row.split("│")[3:9]] == ["2", "4", "13", "3.0?", "6", "1"]
+
+
+def test_run_auto_ranks_first_then_splits_minutes(root, monkeypatch):
+    monkeypatch.chdir(root)
+    (root / "projects" / "demo" / "lenses" / "holistic.md").write_text("Everything.\n")
+    run = CliRunner().invoke
+    assert run(main, ["mirror", "demo"]).exit_code == 0
+    assert run(main, ["units", "demo"]).exit_code == 0
+
+    ranked, prompts = [], []
+
+    def fake_rank_loop(conn, cfg, project, snap, limit, parallel, min_priority, env, *a, **k):
+        rows = cli.rank.unranked(conn, snap, min_priority)
+        conn.executemany(
+            "INSERT INTO unit_reach (snapshot_id, unit_id, reach, created_at) "
+            "VALUES (?, ?, 1, 'now')", [(snap, r["id"]) for r in rows])
+        conn.commit()
+        ranked.append((len(rows), parallel))
+        return {"briefs": 1, "functions": len(rows), "failed": 0, "cost": 0.0,
+                "shortened": 0}
+
+    def fake_run(argv, env, cwd, log_dir, meta, out=None):
+        prompts.append(meta["prompt"])
+        return 0
+
+    monkeypatch.setattr(cli.launch, "rank_loop", fake_rank_loop)
+    monkeypatch.setattr(cli.launch, "run", fake_run)
+    r = run(main, ["run", "demo", "--minutes", "90"])
+    assert r.exit_code == 0, r.output
+    assert ranked and ranked[0][0] > 0 and ranked[0][1] == 4
+    assert prompts == ["/sdive-sweep demo memory --minutes 60",
+                       "/sdive-sweep demo memory --minutes 30"]
+    # Everything ranked now: a second auto run goes straight to work.
+    r = run(main, ["run", "demo", "--runs", "1"])
+    assert r.exit_code == 0 and len(ranked) == 1 and len(prompts) == 3

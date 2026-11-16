@@ -171,12 +171,17 @@ Notes from building it:
   abandoned at the start of the next). `--parallel P` keeps up to four runs in
   flight; concurrent dives are started in different areas, because dossier
   notes only reach other runs once recorded.
-- **Launching**: `sdive run` chooses the work (pending verifies, then the
-  project's `sweep_order`, then dives) and starts `claude -p` on the skill
-  with only the needed tools granted (sdive commands, reads, subagents,
-  writes to the ledger's staging directory). Each session's stream and
-  reported cost are saved under `<ledger>/sessions/`, for calibrating cost per
-  run from real numbers.
+- **Launching**: `sdive run` chooses the work. Auto mode ranks unranked
+  priority-4+ functions first (headless, no orchestrator), then verifies
+  pending hypotheses, then alternates sweeps and dives by their share of the
+  agent-minutes recorded at the snapshot (`sweep_share`, default half), so
+  breadth (a lens over whole areas, least-swept lens first) and depth (the
+  best-ranked files) advance together rather than every sweep finishing before
+  the first dive. A `--minutes` budget is split into sessions, choosing afresh
+  for each. It starts `claude -p` on the skill with only the needed tools
+  granted (sdive commands, reads, subagents, writes to the ledger's staging
+  directory). Each session's stream and reported cost are saved under
+  `<ledger>/sessions/`, for calibrating cost per run from real numbers.
 
 ### Phase 1 — MCUboot calibration
 Write the auditor/verifier agents and the first lenses. **Recall benchmark:** run

@@ -19,7 +19,7 @@ import sqlite3
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,23 +45,43 @@ class Plan:
 
 
 def choose(kind: str | None, lens: str | None, pending: int,
-           sweep_runs: Callable[[str], int], sweep_order: Iterable[str]) -> Plan | None:
-    """What to run. Explicit kind wins; otherwise (auto): verify pending
-    hypotheses first, then the first lens in `sweep_order` with sweep work
-    left, then dives. None when the requested work is already done."""
+           sweep_runs: Callable[[str], int], sweep_order: Iterable[str],
+           spent: Mapping[tuple[str, str | None], float] | None = None,
+           sweep_share: float = 0.5,
+           dive_left: Callable[[], bool] = lambda: True) -> Plan | None:
+    """What to run. Explicit kind wins. Otherwise (auto): verify pending
+    hypotheses first; then share the time between sweeps and dives, so both
+    breadth (a lens across whole areas) and depth (the best-ranked files)
+    advance together. `spent` is the agent-minutes already recorded at this
+    snapshot per (kind, lens); the side behind its share (`sweep_share` of
+    the total for sweeps) goes next, and among sweep lenses with work left,
+    the one with the least time so far (ties: `sweep_order`). None when the
+    requested work is already done."""
     if kind == "verify" or (kind is None and pending):
         if not pending:
             return None
         return Plan("verify", None, f"{pending} hypotheses awaiting verification")
-    if kind in (None, "sweep"):
-        lenses = [lens] if lens else list(sweep_order)
-        for name in lenses:
-            if (n := sweep_runs(name)):
-                return Plan("sweep", name, f"lens {name}: {n} sweep runs left")
-        if kind == "sweep":
+    if kind == "dive":
+        return Plan("dive", lens, "dives requested")
+    lenses = [lens] if lens else list(sweep_order)
+    left = {name: n for name in lenses if (n := sweep_runs(name))}
+    if kind == "sweep":
+        if not left:
             return None
-    return Plan("dive", lens if kind == "dive" else None, "sweeps done; dives next"
-                if kind is None else "dives requested")
+        name = next(iter(left))
+        return Plan("sweep", name, f"lens {name}: {left[name]} sweep runs left")
+    spent = spent or {}
+    sweeps = sum(m for (k, _l), m in spent.items() if k == "sweep")
+    dives = sum(m for (k, _l), m in spent.items() if k == "dive")
+    total = sweeps + dives
+    share = f"sweeps {sweeps:.0f} / dives {dives:.0f} agent-min"
+    if left and (sweeps <= sweep_share * total or not dive_left()):
+        order = list(left)
+        name = min(order, key=lambda n: (spent.get(("sweep", n), 0.0), order.index(n)))
+        return Plan("sweep", name, f"{share}; lens {name}: {left[name]} sweep runs left")
+    if dive_left():
+        return Plan("dive", None, f"{share}; dive next")
+    return None
 
 
 def invocation(plan: Plan, project: str, ledger: str, runs: int | None,

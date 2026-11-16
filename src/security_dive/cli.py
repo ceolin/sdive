@@ -27,6 +27,7 @@ from .units import extract_tree
 
 console = Console()
 EXIT_NOTHING_TO_DO = 3
+RANK_MIN_PRIORITY = 4  # auto ranks these areas first; deep work goes there
 
 
 class Ctx:
@@ -614,6 +615,9 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
 @click.argument("lens", required=False)
 @click.option("--runs", type=int, help="Number of runs (default 1 unless --minutes).")
 @click.option("--minutes", type=float, help="Budget in agent-minutes (see `sdive todo`).")
+@click.option("--session-minutes", type=float, default=60, show_default=True,
+              help="auto with --minutes: split the budget into sessions of this size, "
+                   "choosing the work afresh for each.")
 @click.option("--parallel", type=click.IntRange(1, 4), default=1, show_default=True)
 @click.option("--model", envvar="SDIVE_MODEL", default=launch.DEFAULT_MODEL, show_default=True)
 @click.option("-i", "--interactive", is_flag=True,
@@ -623,16 +627,21 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
 @click.option("--dry-run", is_flag=True, help="Print the claude command; don't run it.")
 @pass_ctx
 def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
-         minutes: float | None, parallel: int, model: str, interactive: bool,
-         keep_api_key: bool, dry_run: bool) -> None:
+         minutes: float | None, session_minutes: float, parallel: int, model: str,
+         interactive: bool, keep_api_key: bool, dry_run: bool) -> None:
     """Launch Claude Code on the next piece of work (or KIND [LENS]).
 
-    auto: verify pending hypotheses, else the next lens in the project's
-    sweep_order with sweep work left, else dives. Runs headless with
-    progress streamed; the session log and its reported cost are saved under
+    auto: first rank any unranked functions at priority >= 4 (headless, as
+    `sdive rank run`); then verify pending hypotheses; then share the time
+    between sweeps and dives (the project's `sweep_share` of recorded
+    agent-minutes at this snapshot goes to sweeps, the least-swept lens in
+    `sweep_order` first). With --minutes, auto splits the budget into
+    sessions of --session-minutes and chooses again before each, so one
+    command mixes verification, sweeps and dives. Runs headless with
+    progress streamed; each session's log and reported cost are saved under
     the ledger's sessions/ directory. Examples:
 
-      sdive run mcuboot --minutes 40
+      sdive run zephyr --minutes 120 --parallel 4
       sdive run mcuboot sweep memory-safety --runs 2
       sdive run mcuboot dive --runs 1 --dry-run
     """
@@ -640,30 +649,56 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
         raise click.UsageError("give --runs or --minutes, not both")
     p = c.project(project)
     _sha, snap = _snapshot_for(c, p, None)
-    pending = c.conn.execute(
-        "SELECT count(*) FROM findings WHERE project = ? AND status = 'hypothesis'",
-        (p.name,)).fetchone()[0]
-    order = p.sweep_order or tuple(n for n in ledger.available_lenses(p) if n != "holistic")
-    plan = launch.choose(None if kind == "auto" else kind, lens, pending,
-                         lambda n: len(ledger.queue_estimate(c.conn, p, snap, "sweep", n)),
-                         order)
-    if plan is None:
-        click.echo(f"nothing to do for {kind}" + (f" {lens}" if lens else ""))
-        sys.exit(EXIT_NOTHING_TO_DO)
-    prompt = launch.invocation(plan, p.name, c.cfg.ledger, runs, minutes, parallel)
-    argv = launch.command(prompt, model, headless=not interactive, staging=c.cfg.staging)
-    click.echo(f"{plan.reason} → {prompt}")
-    if dry_run:
-        click.echo(" ".join(_shell_quote(a) for a in argv))
-        return
+    auto = kind == "auto"
     env = launch.child_env(keep_api_key)
-    if interactive:
-        os.chdir(c.cfg.root)
-        os.execvpe(argv[0], argv, env)
-    status = launch.run(argv, env, c.cfg.root, c.cfg.ledger_dir / "sessions",
-                        {"project": p.name, "ledger": c.cfg.ledger, "model": model,
-                         "prompt": prompt})
-    sys.exit(status)
+
+    if auto and (todo := len(rank.unranked(c.conn, snap, RANK_MIN_PRIORITY))):
+        click.echo(f"{todo} functions at priority >= {RANK_MIN_PRIORITY} unranked → "
+                   "sdive rank run all")
+        if not dry_run:
+            launch.recover_rank_briefs(c.conn, c.cfg)
+            t = launch.rank_loop(c.conn, c.cfg, p, snap, None, max(parallel, 4),
+                                 RANK_MIN_PRIORITY, env)
+            click.echo(f"ranked {t['briefs']} briefs ({t['functions']} functions), "
+                       f"{t['failed']} failed; reported cost ${t['cost']:.2f}\n")
+            if t["failed"] or rank.unranked(c.conn, snap, RANK_MIN_PRIORITY):
+                click.echo("ranking incomplete; stopping before other work", err=True)
+                sys.exit(1)
+
+    order = p.sweep_order or tuple(n for n in ledger.available_lenses(p) if n != "holistic")
+    remaining = minutes
+    while True:
+        pending = c.conn.execute(
+            "SELECT count(*) FROM findings WHERE project = ? AND status = 'hypothesis'",
+            (p.name,)).fetchone()[0]
+        plan = launch.choose(
+            None if auto else kind, lens, pending,
+            lambda n: len(ledger.queue_estimate(c.conn, p, snap, "sweep", n)), order,
+            spent=ledger.agent_minutes(c.conn, p.name, snap), sweep_share=p.sweep_share,
+            dive_left=lambda: bool(ledger.queue_estimate(c.conn, p, snap, "dive", "holistic")))
+        if plan is None:
+            click.echo(f"nothing to do for {kind}" + (f" {lens}" if lens else ""))
+            sys.exit(EXIT_NOTHING_TO_DO if remaining == minutes else 0)
+        chunk = remaining
+        if auto and remaining is not None and not interactive:
+            chunk = min(remaining, session_minutes)
+        prompt = launch.invocation(plan, p.name, c.cfg.ledger, runs, chunk, parallel)
+        argv = launch.command(prompt, model, headless=not interactive, staging=c.cfg.staging)
+        click.echo(f"{plan.reason} → {prompt}")
+        if dry_run:
+            click.echo(" ".join(_shell_quote(a) for a in argv))
+            return
+        if interactive:
+            os.chdir(c.cfg.root)
+            os.execvpe(argv[0], argv, env)
+        status = launch.run(argv, env, c.cfg.root, c.cfg.ledger_dir / "sessions",
+                            {"project": p.name, "ledger": c.cfg.ledger, "model": model,
+                             "prompt": prompt})
+        if remaining is not None:
+            remaining -= chunk
+        if status or not auto or remaining is None or remaining < 1:
+            sys.exit(status)
+        click.echo(f"\n{remaining:g} agent-minutes left\n")
 
 
 def _shell_quote(arg: str) -> str:

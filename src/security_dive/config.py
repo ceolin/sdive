@@ -146,6 +146,7 @@ class Project:
     default_area: Area
     references: tuple[Reference, ...] = ()
     sweep_order: tuple[str, ...] = ()   # lens order for `sdive run` auto
+    sweep_share: float = 0.5            # auto: share of agent-minutes for sweeps
     # Areas from a generated file (areas_source): matched after the
     # hand-written `areas`, the most specific claim winning.
     generated_areas: tuple[Area, ...] = ()
@@ -402,6 +403,7 @@ def _load_project(root: Path, name: str, raw: dict) -> Project:
         default_area=default_area,
         references=tuple(_load_reference(r) for r in spec.get("reference", ())),
         sweep_order=tuple(spec.get("runs", {}).get("sweep_order", ())),
+        sweep_share=float(spec.get("runs", {}).get("sweep_share", 0.5)),
         generated_areas=generated,
         areas_source=areas_source,
         kconfig_map=bool(scope.get("kconfig_map", False)),
