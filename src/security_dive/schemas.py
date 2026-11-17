@@ -162,11 +162,23 @@ class Verdict(_Strict):
         return self
 
 
+class SharedFix(_Strict):
+    cluster: str = Field(description="Slug of another cluster from the brief's "
+                         "related_clusters or other_clusters")
+    reason: str = Field(min_length=1, description="Why the recommended fix necessarily "
+                        "closes that cluster's findings too")
+
+
 class WriteupResult(Verdict):
-    """Output of a write-up (the sdive-writer agent): the verdict for one cluster."""
+    """Output of a write-up (the sdive-writer agent): the verdict for one cluster.
+    `shared_fix` is a hand-back to triage, not part of the advisory: a write-up
+    that names a cluster there cannot be approved until triage merges the two
+    or records them as separate; it is never exported."""
 
     cluster: str = Field(description="Cluster slug exactly as given in the brief")
     model: str = Field(description="Model ID the agent is running as")
+    shared_fix: list[SharedFix] = Field(
+        default=[], description="Other clusters the recommended fix necessarily closes too")
 
 
 # --- the hand-off to zepsec ------------------------------------------------

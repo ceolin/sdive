@@ -154,6 +154,24 @@ def test_overlaps(scoped):
     assert list(out)[-1] == ("a", "b")   # same-cluster pairs last
 
 
+def test_mark_separate(scoped):
+    conn, snap, _ = scoped
+    for s in ("a", "b", "c"):
+        add_finding(conn, snap, s, [("src/parser.c", 3, 6)])
+    add_finding(conn, snap, "h", [("src/parser.c", 3, 6)], status="hypothesis")
+    triage.new_cluster(conn, "demo", "one", "One", None, ["a", "b"])
+    triage.new_cluster(conn, "demo", "two", "Two", None, ["c"])
+    with pytest.raises(ledger.LedgerError, match="hypothesis"):
+        triage.mark_separate(conn, "demo", "a", "h", "x")
+    with pytest.raises(ledger.LedgerError, match="share findings"):
+        triage.mark_separate(conn, "demo", "one", "one", "x", clusters=True)
+    assert triage.mark_separate(conn, "demo", "two", "one", "apart", clusters=True) == 2
+    assert [triage.is_open(p) for p in triage.overlaps(conn, "demo")] == [False] * 3
+    # Re-deciding replaces the note rather than failing.
+    assert triage.mark_separate(conn, "demo", "c", "a", "apart, again") == 1
+    assert len(triage.separate_notes(conn)) == 2
+
+
 def test_track_cleared_on_membership_change(scoped):
     conn, snap, _ = scoped
     for s in ("a", "b", "c"):
@@ -188,7 +206,12 @@ def test_status(scoped):
     triage.new_cluster(conn, "demo", "aa", "A", None, ["a"])
     st = triage.status(conn, "demo")
     assert st["overlaps"][0]["b"] == "b" and st["cluster"] == [{"slug": "b", "title": "B"}]
-    triage.new_cluster(conn, "demo", "bb", "B", None, ["b"])   # pair decided: apart
+    triage.new_cluster(conn, "demo", "bb", "B", None, ["b"])
+    assert nxt() == "overlaps"   # two clusters, but the pair is not decided yet
+    with pytest.raises(ledger.LedgerError, match="note"):
+        triage.mark_separate(conn, "demo", "a", "b", " ")
+    assert triage.mark_separate(conn, "demo", "a", "b", "two root causes") == 1
+    assert triage.overlaps(conn, "demo")[0]["separate"] == "two root causes"
     assert nxt() == "track"
     triage.set_track(conn, "aa", "plain-fix", "wrongly")       # scope says released
     triage.set_track(conn, "bb", "advisory", "in v1.0.0")

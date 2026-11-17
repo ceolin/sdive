@@ -73,13 +73,14 @@ flowchart TD
 
     subgraph triage ["Triage: /sdive-triage"]
         scope["1. Shipped?<br/>release scoping"] --> dup["2. Same bug?<br/>overlaps, duplicates"]
-        dup --> cluster["3. One fix closes what?<br/>clusters"]
+        dup --> cluster["3. One fix closes what?<br/>clusters, merge or separate"]
         cluster --> track{"4. Track"}
     end
 
     track -->|advisory: shipped| export
     track -->|plain-fix: never released| export
     export["Write-up · review · export: /sdive-writeup<br/>analysis/exports/&lt;p&gt;/&lt;cluster&gt;/"] --> zepsec
+    export -->|writer: fix also closes another cluster| cluster
 
     subgraph zepsec ["zepsec (client side)"]
         dedup["Dedup vs advisories<br/>and disclosures"] --> ghsa["Embargoed GHSA draft"]
@@ -265,11 +266,12 @@ picks up where the ledger stands. `sdive triage <p>` alone shows what's left.
 | Step | Left when | What decides it |
 |---|---|---|
 | `scope` | a verified finding has no release scoping at its snapshot | nothing: `sdive mirror <p>` then `sdive scope <p>` |
-| `overlaps` | two verified findings share lines (or a function) and at least one is in no cluster; once both are clustered the pair counts as decided | read both claims: **duplicate** (one defect, described twice), **one fix** (same cluster) or **separate** (distinct defects in shared code, which is common) |
+| `overlaps` | two verified findings share lines (or a function) and are neither in one cluster nor recorded as separate. Being in two different clusters does not settle a pair: it stays open until it is merged or separated | read both claims: **duplicate** (one defect, described twice), **one fix** (same cluster; merge if both are already clustered) or **separate** (distinct defects in shared code, which is common; `sdive cluster separate` records it with the root causes) |
 | `cluster` | a verified finding is in no cluster | join an existing cluster or start one (the CVE counting rule below) |
 | `empty` | a cluster has no members (after a merge or a duplicate) | drop it |
 | `track` | a cluster has no track | its shape first (split? merge?), then the track from its scope |
 | `check` | a track contradicts its scope (`advisory` but `post-release`, `plain-fix` but `released`) | decide the track again |
+| `shared-fix` | a write-up's writer says its recommended fix also closes another cluster (`shared_fix`, below in §5) | merge the clusters, or record them as separate (`--clusters`); either way the write-up is redrafted |
 
 **The CVE counting rule.** Zephyr, MCUboot's CNA, wants one CVE per
 independently fixable flaw. Join findings in a cluster only when one natural
@@ -297,12 +299,13 @@ a different set of findings.
 | `sdive triage <p> [--json]` | What's left at each step, and the next thing to do. |
 | `sdive findings <p> --status verified` | The verified findings and their slugs. |
 | `sdive finding show <slug>` | One finding: claim, locations, history (JSON). |
-| `sdive overlaps <p> [--json]` | Pairs of verified findings sharing lines (or, failing that, a function); pairs in one cluster last. |
+| `sdive overlaps <p> [--json]` | Pairs of verified findings sharing lines (or, failing that, a function), with how each was decided; open pairs first. |
 | `sdive scope <p> [slug...] [--redo] [--json]` | Release scoping; `--json` lists each location's blamed commits, marked `post_release`. |
 | `sdive finding set <slug> --status duplicate --of <orig> [--note N]` | Marks `<slug>` a duplicate of `<orig>` (the one kept); it leaves any cluster. |
 | `sdive cluster new <p> <cluster> <slug>... --title T [--rationale R] [--move]` | Starts a cluster. |
 | `sdive cluster add <cluster> <slug>... [--move]` / `cluster remove <cluster> <slug>...` | Changes membership (`--move` takes a finding from another cluster). |
 | `sdive cluster edit <cluster> [--title T] [--rationale R]` / `cluster drop <cluster>` | Edits a cluster; deletes an empty one. |
+| `sdive cluster separate <p> <a> <b> --note N [--clusters]` | Records that two findings (or, with `--clusters`, every member pair of two clusters) need separate fixes; the note names the distinct root causes. |
 | `sdive cluster track <cluster> advisory\|plain-fix --note N` | Records the track and its evidence. |
 | `sdive clusters <p>` / `sdive cluster show <cluster>` | Clusters with track, combined scope and release range, then findings in none; one cluster as JSON. |
 
@@ -326,7 +329,10 @@ often has the same name.
    the verifier's reasoning, and the release-scoping blame, plus the
    project's writer guidance (`projects/<p>/writer.md`: attack-vector
    mapping, `reachable_surface` vocabulary, how to name configurations and
-   versions) and `enabled_by` where recorded. The writer re-reads the code
+   versions) and `enabled_by` where recorded. It also lists the project's
+   other clusters: in detail (members, shared locations, any separate
+   decision) those that share code with a member, the rest by slug and
+   title, so the writer can cite them. The writer re-reads the code
    and writes zepsec's verdict fields (`mcuboot-deep-analyst`; for Zephyr
    `zepsec-deep-analyst`, which lacks only the property and attacker class):
    - `is_vulnerability`, `property_violated`, `attacker_class`, `vuln_class`,
@@ -339,7 +345,9 @@ often has the same name.
    - `confidence`, `evidence`, `rationale`
 
    It adds sdive's own fields: `affected_configurations`, `recommended_fix`
-   (which briefs the fix author) and `open_questions`.
+   (which briefs the fix author) and `open_questions`, and `shared_fix`: other
+   clusters its recommended fix necessarily closes too, with the reason. That
+   one is a hand-back to triage and is never exported.
 2. **Record.** `sdive writeup record <cluster>` validates the draft and
    stores it as a new version. sdive scores the CVSS 3.1 vector itself, and
    `severity` must be its GitHub band. The property and attacker class must
@@ -347,7 +355,10 @@ often has the same name.
    (`advisory` → true, `plain-fix` → false with a post-release-only reason).
    Every cited component must exist in the snapshot, and no absolute or local
    path may appear in the text, since the text is published. A rejected draft
-   goes back to the writer with the reasons.
+   goes back to the writer with the reasons. A draft with `shared_fix` is
+   recorded as `needs-triage` and cannot be approved: the skill proposes a
+   merge or a separate decision (the triage rules, your approval), then
+   drafts again with the outcome in the brief.
 3. **Review.** `sdive writeup show <cluster> [--version N] [--json]` renders
    the draft exactly as it will be exported. You approve it, ask for changes
    (the writer revises from the previous version plus your feedback; `writeup
@@ -371,8 +382,9 @@ often has the same name.
 
 A write-up belongs to the members it was written for. If the cluster's
 membership changes afterwards (which also clears its track), the write-up is
-`stale` and must be drafted again. States in `sdive writeups`:
-`needs-writeup`, `stale`, `draft`, `approved`, `exported`. Approving a new
+`stale` and must be drafted again; so is a `needs-triage` write-up once
+triage has settled its `shared_fix` flags. States in `sdive writeups`:
+`needs-writeup`, `stale`, `needs-triage`, `draft`, `approved`, `exported`. Approving a new
 version of an exported cluster makes it `approved` again, ready to re-export.
 
 | Command | Does |

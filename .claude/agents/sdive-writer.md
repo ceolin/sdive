@@ -21,7 +21,11 @@ blamed commits with their dates, summaries and first release), `snapshot.path`,
 `threat_model`, `writer_guidance` (the project's guidance: attack vectors,
 surface vocabulary, how to name configurations and versions), optional
 `references` (library trees), optional `enabled_by` (what enables each file),
-and, for a revision, `previous_writeup` and `feedback`.
+`related_clusters` (other clusters sharing code with a member: their
+members, rationale, the shared locations, and `separate`, the notes of any
+triage decision that they need their own fix), `other_clusters` (every other
+cluster, by slug and title), and, for a revision, `previous_writeup` and
+`feedback`.
 
 Read `writer_guidance` in full before writing: where it is more specific than
 the field descriptions below, it wins.
@@ -111,6 +115,16 @@ Write one JSON object, exactly the fields below, nothing else.
 - `open_questions`: anything the review should settle that the code could not
   (configuration defaults outside the tree, board stack sizes, library
   versions). `[]` if none.
+- `shared_fix`: other clusters your `recommended_fix` **necessarily** closes
+  too, as `{"cluster": "<slug from related_clusters or other_clusters>",
+  "reason": "<which change closes which of its findings>"}`. One CVE covers
+  one independently fixable flaw, so this sends the cluster back to triage to
+  merge or separate them. Name a cluster only when the fix you recommend
+  removes its defect as a consequence, not merely because it shares code,
+  theme or a function; never when its `separate` notes already record the
+  decision (then write the fix narrowly and cite it instead). When you see a
+  related flaw that the fix does not close, mention the cluster's slug in
+  `open_questions` and keep it out of the advisory text. `[]` if none.
 
 **Never write an absolute or local path** (`/Users/…`, `/home/…`,
 `work/snapshots/…`) anywhere: the text is published. Use the snapshot path only

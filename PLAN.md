@@ -267,9 +267,13 @@ ledger; zepsec consumes a local export and reports back through a status file.
 
 Triage (steps 1–2) is driven by the `/sdive-triage` skill: `sdive triage`
 reports what is left (scope, overlap pairs, unclustered findings, empty
-clusters, untracked clusters, tracks contradicting scope); the skill proposes
-each decision with evidence and records only what the user approves. Changing
-a cluster's membership clears its track.
+clusters, untracked clusters, tracks contradicting scope, write-ups flagging a
+shared fix); the skill proposes each decision with evidence and records only
+what the user approves. Changing a cluster's membership clears its track.
+An overlap pair (two findings sharing code) stays open until it is in one
+cluster or recorded as separate (`sdive cluster separate`, decided
+2026-11-16): sitting in two different clusters does not settle it, because
+clustering one finding at a time never compares the clusters it produced.
 
 1. **Consolidate.** Duplicates the verifier missed are marked by hand
    (`sdive finding set S --status duplicate --of ORIG`). Verified findings are
@@ -294,6 +298,9 @@ a cluster's membership clears its track.
    band, checks `reportable` against the track and cited components against
    the snapshot, and rejects local paths. Drafts are versions (`writeups`
    table); a human approves one. A membership change makes the write-up stale.
+   The writer can hand a cluster back to triage (`shared_fix`: other clusters
+   its fix necessarily closes); such a draft cannot be approved until triage
+   merges or separates the clusters, and is then redrafted.
 4. **Export** (built: `sdive export`): writes the approved version to
    `analysis/exports/<p>/<cluster>/`: `cluster.json` (schema
    `sdive-export/1`: the verdict fields at the top level so zepsec reads it as

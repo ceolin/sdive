@@ -1070,6 +1070,23 @@ def cluster_drop(c: Ctx, slug: str) -> None:
     click.echo(f"cluster {slug}: dropped")
 
 
+@cluster.command("separate")
+@click.argument("project")
+@click.argument("a")
+@click.argument("b")
+@click.option("--note", required=True, help="The distinct root causes (why two fixes).")
+@click.option("--clusters", "as_clusters", is_flag=True,
+              help="A and B are clusters: record every pair of their members.")
+@pass_ctx
+def cluster_separate(c: Ctx, project: str, a: str, b: str, note: str,
+                     as_clusters: bool) -> None:
+    """Record that findings A and B need separate fixes (an overlap pair, or a
+    writer's shared-fix flag, decided apart)."""
+    c.project(project)
+    n = triage.mark_separate(c.conn, project, a, b, note, as_clusters)
+    click.echo(f"{a} / {b}: separate ({n} pair{'s' if n != 1 else ''})")
+
+
 @cluster.command("track")
 @click.argument("slug")
 @click.argument("track", type=click.Choice(["advisory", "plain-fix"]))
@@ -1133,13 +1150,13 @@ def triage_status(c: Ctx, project: str, as_json: bool) -> None:
         return
     def line(name: str, items: list, what: str, show) -> None:
         mark = "[green]done[/green]" if not items else f"[yellow]{len(items)}[/yellow]"
-        console.print(f"[bold]{name:<9}[/bold] {mark}  {what}")
+        console.print(f"[bold]{name:<10}[/bold] {mark}  {what}")
         for it in items[:12]:
-            console.print(f"            {show(it)}", markup=False)
+            console.print(f"             {show(it)}", markup=False)
         if len(items) > 12:
-            console.print(f"            ... {len(items) - 12} more")
+            console.print(f"             ... {len(items) - 12} more")
     line("scope", st["scope"], "verified findings not yet release-scoped", str)
-    line("overlaps", st["overlaps"], "pairs sharing code, one side in no cluster",
+    line("overlaps", st["overlaps"], "pairs sharing code, not in one cluster or separated",
          lambda p: f"{p['a']} / {p['b']}  ({p['kind']}: {', '.join(p['shared'])})")
     line("cluster", st["cluster"], "verified findings in no cluster", lambda f: f["slug"])
     line("empty", st["empty"], "clusters with no members", lambda r: r["cluster"])
@@ -1147,7 +1164,10 @@ def triage_status(c: Ctx, project: str, as_json: bool) -> None:
          lambda r: f"{r['cluster']}  (scope {r['scope'] or 'unscoped'}, {r['members']})")
     line("check", st["check"], "tracks contradicting their scope",
          lambda r: f"{r['cluster']}  ({r['track']} but {r['scope']})")
-    console.print(f"[bold]tracked[/bold]   {len(st['tracked'])} clusters ready for write-up")
+    line("shared-fix", st["shared-fix"], "write-ups whose fix also closes another cluster",
+         lambda r: f"{r['cluster']} v{r['version']} -> "
+         f"{', '.join(f['cluster'] for f in r['open'])}")
+    console.print(f"[bold]tracked[/bold]    {len(st['tracked'])} clusters ready for write-up")
     n = st["next"]
     console.print(f"\nnext: {n['step']} — {n['command']}" if n
                   else "\ntriage complete; next: write-up and export")
@@ -1159,17 +1179,19 @@ def triage_status(c: Ctx, project: str, as_json: bool) -> None:
 @pass_ctx
 def overlaps(c: Ctx, project: str, as_json: bool) -> None:
     """Pairs of verified findings sharing lines (or a function): duplicate or
-    cluster candidates. Pairs already in one cluster are listed last."""
+    cluster candidates. Decided pairs (in one cluster, or recorded as
+    separate) are listed last."""
     pairs = triage.overlaps(c.conn, project)
     if as_json:
         _emit_json(pairs)
         return
     t = Table()
-    for col in ("finding", "finding", "shares", "where", "same cluster"):
+    for col in ("finding", "finding", "shares", "where", "decided"):
         t.add_column(col, overflow="fold")
     for p in pairs:
         t.add_row(p["a"], p["b"], p["kind"], "\n".join(p["shared"]),
-                  "yes" if p["same_cluster"] else "")
+                  "same cluster" if p["same_cluster"] else "separate" if p["separate"]
+                  else "")
     console.print(t)
     if not pairs:
         click.echo("no overlapping verified findings")
@@ -1394,6 +1416,14 @@ def writeup_record(c: Ctx, cluster: str, path: Path | None) -> None:
     score = f" {r['cvss_score']}" if r["cvss_score"] is not None else ""
     click.echo(f"{cluster}: write-up v{r['version']} recorded ({r['severity']}{score}): "
                f"{r['summary']}")
+    _shared_fix(r["shared_fix"])
+
+
+def _shared_fix(flags: list[dict]) -> None:
+    for fl in flags:
+        click.echo(f"  ! fix also closes {fl['cluster']}: {fl['reason']}")
+    if flags:
+        click.echo("  needs triage: merge or separate before approval")
 
 
 @writeup_grp.command("show")
@@ -1403,11 +1433,13 @@ def writeup_record(c: Ctx, cluster: str, path: Path | None) -> None:
 @pass_ctx
 def writeup_show(c: Ctx, cluster: str, version: int | None, as_json: bool) -> None:
     """Show a write-up as it would be exported (cluster.md, or --json)."""
-    doc = writeup.document(c.conn, c.cfg, cluster, writeup.get(c.conn, cluster, version))
+    row = writeup.get(c.conn, cluster, version)
+    doc = writeup.document(c.conn, c.cfg, cluster, row)
     if as_json:
         _emit_json(doc)
     else:
         click.echo(writeup.render_md(doc))
+        _shared_fix(json.loads(row["content"]).get("shared_fix") or [])
 
 
 @writeup_grp.command("approve")
@@ -1427,7 +1459,7 @@ def writeup_approve(c: Ctx, cluster: str, version: int | None, note: str | None)
 @pass_ctx
 def writeups(c: Ctx, project: str, as_json: bool) -> None:
     """Tracked clusters between triage and export, highest priority first:
-    needs-writeup, stale, draft, approved, exported."""
+    needs-writeup, stale, needs-triage, draft, approved, exported."""
     c.project(project)
     rows = writeup.status(c.conn, project)
     if as_json:

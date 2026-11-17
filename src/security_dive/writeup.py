@@ -17,6 +17,13 @@ never contains truth-set content (it is built from the ledger alone).
 
 A write-up belongs to the member set it was written for: if the cluster's
 membership changes afterwards it is **stale** and must be redone.
+
+The writer can hand a cluster back to triage: `shared_fix` names other
+clusters its recommended fix necessarily closes too (the brief lists the
+related clusters so it can name them). Such a write-up is **needs-triage** and
+cannot be approved; triage either merges the clusters (the write-up goes stale
+by membership) or records them as separate (it goes stale by the decision),
+and the next brief carries the outcome.
 """
 
 from __future__ import annotations
@@ -162,6 +169,47 @@ def guidance_path(project) -> Path:
     return project.defdir / "writer.md"
 
 
+def _neighbours(conn: sqlite3.Connection, c: sqlite3.Row,
+                members: list[sqlite3.Row]) -> tuple[list[dict], list[dict]]:
+    """Other clusters of the project, for the writer to cite or flag in
+    `shared_fix`: those sharing code with a member, or with a recorded separate
+    decision against one (with the shared locations and the decision notes),
+    then every other cluster by slug and title."""
+    mine = {m["slug"]: m["id"] for m in members}
+    where = {r["slug"]: (r["id"], r["cluster"]) for r in conn.execute(
+        "SELECT f.slug, f.id, c.slug AS cluster FROM findings f "
+        "JOIN clusters c ON c.id = f.cluster_id WHERE f.project = ?", (c["project"],))}
+    links: dict[str, dict] = {}
+
+    def link(other: str) -> dict:
+        return links.setdefault(other, {"shared": [], "separate": []})
+
+    for p in triage.overlaps(conn, c["project"]):
+        for me, them in ((p["a"], p["b"]), (p["b"], p["a"])):
+            if me in mine and them in where and where[them][1] != c["slug"]:
+                lk = link(where[them][1])
+                lk["shared"] += [s for s in p["shared"] if s not in lk["shared"]]
+    by_id = {fid: cl for fid, cl in where.values()}
+    for (a, b), note in triage.separate_notes(conn).items():
+        for me, them in ((a, b), (b, a)):
+            if me in mine.values() and them in by_id and by_id[them] != c["slug"]:
+                lk = link(by_id[them])
+                if note not in lk["separate"]:
+                    lk["separate"].append(note)
+    related, others = [], []
+    for o in conn.execute("SELECT * FROM clusters WHERE project = ? AND id != ? ORDER BY id",
+                          (c["project"], c["id"])):
+        if o["slug"] not in links:
+            others.append({"slug": o["slug"], "title": o["title"]})
+            continue
+        related.append({
+            "slug": o["slug"], "title": o["title"], "rationale": o["rationale"],
+            "members": [{"slug": m["slug"], "title": m["title"]}
+                        for m in triage.cluster_members(conn, o["id"])],
+            **links[o["slug"]]})
+    return related, others
+
+
 def brief(conn: sqlite3.Connection, cfg: Config, slug: str,
           feedback: str | None = None) -> dict:
     """Everything the writer needs for one cluster, written to staging."""
@@ -196,6 +244,7 @@ def brief(conn: sqlite3.Connection, cfg: Config, slug: str,
             "confidence": m["confidence"], "locations": _finding_locations(conn, m["id"]),
             "verification": _verifications(conn, cfg, m), "scope": _scope(conn, m),
         })
+    out["related_clusters"], out["other_clusters"] = _neighbours(conn, c, members)
     prev = latest(conn, c["id"])
     if prev is not None:
         out["previous_writeup"] = {"version": prev["version"],
@@ -241,6 +290,13 @@ def validate(conn: sqlite3.Connection, cfg: Config, slug: str, data: dict) -> di
                         f"({', '.join(sorted(attackers))})")
     if w.cluster != slug:
         problems.append(f"result is for cluster {w.cluster!r}, not {slug!r}")
+    for fl in w.shared_fix:
+        if fl.cluster == slug:
+            problems.append("shared_fix names this cluster itself")
+        elif not conn.execute("SELECT 1 FROM clusters WHERE slug = ? AND project = ?",
+                              (fl.cluster, c["project"])).fetchone():
+            problems.append(f"shared_fix names {fl.cluster!r}, which is not a "
+                            f"{c['project']} cluster")
     if c["track"] == "advisory" and not w.reportable:
         problems.append("the cluster's track is advisory, so reportable must be true")
     if c["track"] == "plain-fix" and w.reportable:
@@ -302,7 +358,8 @@ def record(conn: sqlite3.Connection, cfg: Config, slug: str,
     bp.unlink(missing_ok=True)
     path.unlink(missing_ok=True)
     return {"cluster": slug, "version": version, "severity": content["severity"],
-            "cvss_score": content["cvss_score"], "summary": content["advisory_summary"]}
+            "cvss_score": content["cvss_score"], "summary": content["advisory_summary"],
+            "shared_fix": content["shared_fix"]}
 
 
 def get(conn: sqlite3.Connection, slug: str, version: int | None = None) -> sqlite3.Row:
@@ -322,6 +379,11 @@ def approve(conn: sqlite3.Connection, slug: str, version: int | None, note: str 
     if json.loads(row["members"]) != sorted(m["slug"] for m in members):
         raise LedgerError(f"write-up v{row['version']} of {slug} was written for other "
                           "members; write it again")
+    shared = [fl["cluster"] for fl in json.loads(row["content"]).get("shared_fix") or []]
+    if shared:
+        raise LedgerError(f"write-up v{row['version']} of {slug} says its fix also closes "
+                          f"{', '.join(shared)}: merge or separate them in triage, then "
+                          "write it again")
     with conn:
         conn.execute("UPDATE writeups SET approved_at = ?, approval_note = ? WHERE id = ?",
                      (now(), note, row["id"]))
@@ -342,14 +404,17 @@ def status(conn: sqlite3.Connection, project: str) -> list[dict]:
     """Per tracked cluster: where it stands between triage and export, in
     priority order.
 
-    state: needs-writeup | stale (membership changed since the latest write-up) |
-    draft (latest not approved) | approved (latest approved, not exported at that
-    version) | exported.
+    state: needs-writeup | stale (membership changed since the latest write-up,
+    or the write-up's shared-fix flags have been settled by triage) |
+    needs-triage (the writer says the fix also closes another cluster; triage
+    must merge or separate them) | draft (latest not approved) | approved
+    (latest approved, not exported at that version) | exported.
 
     Priority is the CVSS score: the latest write-up's, else the highest of the
     members' verifier vectors; ties go to the weaker attacker class (A1 first),
     then to the older cluster."""
     out = []
+    flags = {f["cluster"]: f for f in triage.shared_fix_flags(conn, project)}
     for c in conn.execute("SELECT * FROM clusters WHERE project = ? AND track IS NOT NULL "
                           "ORDER BY id", (project,)):
         rows = triage.cluster_members(conn, c["id"])
@@ -377,6 +442,8 @@ def status(conn: sqlite3.Connection, project: str) -> list[dict]:
             row["state"] = "needs-writeup"
         elif json.loads(w["members"]) != members:
             row["state"] = "stale"
+        elif c["slug"] in flags:
+            row["state"] = "needs-triage" if flags[c["slug"]]["open"] else "stale"
         elif not w["approved_at"]:
             row["state"] = "draft"
         elif exp is None or exp["writeup_id"] != w["id"]:
@@ -421,7 +488,8 @@ def document(conn: sqlite3.Connection, cfg: Config, slug: str,
     doc = {"schema": EXPORT_SCHEMA, "source": "security-dive", "project": c["project"],
            "cluster": slug, "title": c["title"], "track": c["track"],
            "track_note": c["track_note"], "sha": snap["sha"]}
-    doc.update({k: v for k, v in content.items() if k not in ("cluster", "model")})
+    doc.update({k: v for k, v in content.items()
+                if k not in ("cluster", "model", "shared_fix")})
     doc["members"] = []
     for m in members:
         verifs = _verifications(conn, cfg, m)

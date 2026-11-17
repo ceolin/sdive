@@ -1,6 +1,6 @@
 ---
 name: sdive-triage
-description: Drive security-dive triage interactively — turn verified findings into clusters (one fix, one advisory, one CVE each) with a recorded track. Works through `sdive triage`'s steps (release scoping, overlap pairs, duplicates, clustering, track), proposes each decision with its evidence, and records it only after the user approves. Invoke as /sdive-triage <project> [--ledger X]. Use after verification, before write-up and export.
+description: Drive security-dive triage interactively — turn verified findings into clusters (one fix, one advisory, one CVE each) with a recorded track. Works through `sdive triage`'s steps (release scoping, overlap pairs to merge or separate, duplicates, clustering, track, writers' shared-fix flags), proposes each decision with its evidence, and records it only after the user approves. Invoke as /sdive-triage <project> [--ledger X]. Use after verification, before write-up and export.
 argument-hint: "<project> [--ledger main]"
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---
@@ -43,7 +43,8 @@ the track step, not now.
 
 ### overlaps: pairs of findings that share code
 
-For each open pair (`overlaps` in the JSON: at least one side in no cluster),
+For each open pair (`overlaps` in the JSON: not in one cluster and not
+recorded as separate; sides may already sit in two different clusters),
 read both findings (`uv run sdive finding show <slug>`) and the shared code in
 the finding's snapshot, `work/snapshots/<project>/<sha>/`. Decide which of
 three it is:
@@ -53,12 +54,20 @@ three it is:
   `uv run sdive finding set <copy> --status duplicate --of <orig> --note "<why>"`.
   Keep as `<orig>` the clearer, better-located claim (if equal, the older one).
 - **One fix**: different defects or symptoms, but one change necessarily
-  closes both. Propose putting both in one cluster (next step).
+  closes both. Propose putting both in one cluster: `cluster new` / `cluster
+  add` if a side is unclustered, or a merge if both are clustered
+  (`cluster add <keep> <slug>... --move`, `cluster drop <emptied>`,
+  `cluster edit <keep> --title/--rationale` to cover both, then its track).
+  Prefer to keep the cluster with the broader title or an existing write-up.
 - **Separate**: distinct defects that happen to share lines (common: several
   bugs on one parsing path). Each goes to its own cluster. Sharing code is only
-  a lead; say which distinct root causes you see.
+  a lead; say which distinct root causes you see, and propose
+  `uv run sdive cluster separate <project> <a> <b> --note "<root cause a; root cause b>"`.
 
-Once both sides are in clusters the pair counts as decided and leaves the list.
+A pair leaves the list only when it is in one cluster or recorded as separate.
+When many pairs are open (e.g. the first run after everything was clustered),
+group them by subsystem and present the merges first, then the separations as
+batches.
 
 ### cluster: verified findings in no cluster
 
@@ -89,10 +98,9 @@ After a merge or a duplicate marking. Propose `uv run sdive cluster drop <c>`.
 ### track: clusters with no track
 
 Before proposing a track, **check the cluster's shape**: run
-`uv run sdive cluster show <c>`, and look in `uv run sdive overlaps <project> --json`
-for pairs linking this cluster's members to another cluster. Should the
-cluster be split (fixes could land independently) or merged with that other
-cluster (one change fixes both)? Raise those as reshaping proposals first.
+`uv run sdive cluster show <c>`. Should the cluster be split (fixes could land
+independently)? Raise that as a reshaping proposal first. (Merges with other
+clusters come from the overlaps and shared-fix steps.)
 
 Then the track, following the disclosure policy in `PLAN.md`:
 
@@ -119,6 +127,21 @@ BOOT_MAX_ALIGN; overflow present in v2.5.0`. Propose
 `advisory` with scope `post-release`, or `plain-fix` with `released`: usually
 the scope was redone after the track was set. Show both and propose a new
 track decision.
+
+### shared-fix: a writer says one fix closes two clusters
+
+The `sdive-writer` read the code for a write-up and named, in `shared_fix`,
+other clusters its recommended fix necessarily closes (`open` in the JSON:
+each with the writer's reason). Read the writer's reason, both clusters'
+members (`cluster show`) and the code, and judge it by the CVE counting rule:
+
+- **Merge** when the natural fix closes both. Fold the other cluster's members
+  into the flagged one (as under one fix above) and set the track again.
+- **Separate** when a narrower fix could land for each: propose
+  `uv run sdive cluster separate <project> --clusters <c> <other> --note "<why two fixes>"`.
+
+Either way the write-up becomes `stale`; the next `/sdive-writeup` brief
+carries the outcome.
 
 ## Finish
 

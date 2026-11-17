@@ -188,16 +188,99 @@ def unclustered(conn: sqlite3.Connection, project: str) -> list[sqlite3.Row]:
         "AND cluster_id IS NULL ORDER BY id", (project,)).fetchall()
 
 
+def _pair_key(a: int, b: int) -> tuple[int, int]:
+    return (a, b) if a < b else (b, a)
+
+
+def separate_notes(conn: sqlite3.Connection) -> dict[tuple[int, int], str]:
+    """Recorded "separate" decisions, by (lower, higher) finding id."""
+    return {(r["finding_a"], r["finding_b"]): r["note"]
+            for r in conn.execute("SELECT * FROM separate_pairs")}
+
+
+def _side(conn: sqlite3.Connection, project: str, slug: str, as_cluster: bool) -> list[int]:
+    """Finding ids a `separate` argument names: one finding, or a cluster's members."""
+    if as_cluster:
+        c = _cluster(conn, slug)
+        if c["project"] != project:
+            raise LedgerError(f"cluster {slug} is not in {project}")
+        ids = [m["id"] for m in cluster_members(conn, c["id"])]
+        if not ids:
+            raise LedgerError(f"cluster {slug} has no members")
+        return ids
+    f = conn.execute("SELECT id, project, status FROM findings WHERE slug = ?",
+                     (slug,)).fetchone()
+    if f is None or f["project"] != project:
+        raise LedgerError(f"no {project} finding {slug!r}")
+    if f["status"] not in ("verified", "exported", "fixed"):
+        raise LedgerError(f"{slug} is {f['status']}; only verified findings are triaged")
+    return [f["id"]]
+
+
+def mark_separate(conn: sqlite3.Connection, project: str, a: str, b: str, note: str,
+                  clusters: bool = False) -> int:
+    """Record that A and B need separate fixes (findings, or with `clusters`
+    every member pair of two clusters). Returns the number of pairs recorded."""
+    if not note.strip():
+        raise LedgerError("a separate decision needs a note naming the distinct root causes")
+    left, right = _side(conn, project, a, clusters), _side(conn, project, b, clusters)
+    if set(left) & set(right):
+        raise LedgerError(f"{a} and {b} share findings; nothing to separate")
+    pairs = {_pair_key(x, y) for x in left for y in right}
+    with conn:
+        conn.executemany("INSERT OR REPLACE INTO separate_pairs (finding_a, finding_b, note, "
+                         "decided_at) VALUES (?, ?, ?, ?)",
+                         [(x, y, note, now()) for x, y in sorted(pairs)])
+    return len(pairs)
+
+
+def shared_fix_flags(conn: sqlite3.Connection, project: str) -> list[dict]:
+    """Write-ups whose writer said the recommended fix also closes another
+    cluster, with the flags triage has not settled yet.
+
+    A flag is settled when the named cluster is gone or is this cluster (a
+    merge), or when every member pair of the two clusters is recorded as
+    separate. Only a cluster's latest write-up counts, and only while it was
+    written for the current members (a merge makes it stale anyway)."""
+    seps = separate_notes(conn)
+    out = []
+    for c in conn.execute("SELECT * FROM clusters WHERE project = ? ORDER BY id", (project,)):
+        w = conn.execute("SELECT * FROM writeups WHERE cluster_id = ? ORDER BY version DESC",
+                         (c["id"],)).fetchone()
+        if w is None:
+            continue
+        flags = json.loads(w["content"]).get("shared_fix") or []
+        members = cluster_members(conn, c["id"])
+        if not flags or json.loads(w["members"]) != sorted(m["slug"] for m in members):
+            continue
+        open_flags = []
+        for fl in flags:
+            other = conn.execute("SELECT * FROM clusters WHERE slug = ? AND project = ?",
+                                 (fl["cluster"], project)).fetchone()
+            if other is None or other["id"] == c["id"]:
+                continue
+            theirs = cluster_members(conn, other["id"])
+            if theirs and all(_pair_key(m["id"], t["id"]) in seps
+                              for m in members for t in theirs):
+                continue
+            open_flags.append(fl)
+        out.append({"cluster": c["slug"], "version": w["version"], "flags": flags,
+                    "open": open_flags})
+    return out
+
+
 def overlaps(conn: sqlite3.Connection, project: str) -> list[dict]:
     """Pairs of verified findings with a location in common: the same lines of a
     file, or failing that the same function. Candidates for a missed duplicate
-    or for one cluster; whether they are either is a judgement on the claims."""
+    or for one cluster; whether they are either is a judgement on the claims.
+    `separate` is the note of a recorded separate decision, if any."""
     locs = conn.execute(
         "SELECT f.id, f.slug, f.cluster_id, l.path, l.start_line, "
         "coalesce(l.end_line, l.start_line) AS end_line, l.symbol, l.unit_id "
         "FROM finding_locations l JOIN findings f ON f.id = l.finding_id "
         "WHERE f.project = ? AND f.status IN ('verified', 'exported') ORDER BY f.id",
         (project,)).fetchall()
+    seps = separate_notes(conn)
     pairs: dict[tuple[int, int], dict] = {}
     for i, a in enumerate(locs):
         for b in locs[i + 1:]:
@@ -210,37 +293,44 @@ def overlaps(conn: sqlite3.Connection, project: str) -> list[dict]:
                 kind, where = "function", f"{a['path']} {a['symbol'] or ''}".strip()
             else:
                 continue
-            key = (a["id"], b["id"]) if a["id"] < b["id"] else (b["id"], a["id"])
+            key = _pair_key(a["id"], b["id"])
             first, second = (a, b) if a["id"] < b["id"] else (b, a)
             p = pairs.setdefault(key, {
                 "a": first["slug"], "b": second["slug"], "kind": kind, "shared": [],
                 "same_cluster": first["cluster_id"] is not None
-                and first["cluster_id"] == second["cluster_id"]})
+                and first["cluster_id"] == second["cluster_id"],
+                "separate": seps.get(key)})
             if kind == "lines" and p["kind"] == "function":
                 p["kind"], p["shared"] = "lines", []
             if kind == p["kind"] and where not in p["shared"]:
                 p["shared"].append(where)
-    return sorted(pairs.values(), key=lambda p: (p["same_cluster"], p["kind"] != "lines",
+    return sorted(pairs.values(), key=lambda p: (not is_open(p), p["kind"] != "lines",
                                                  p["a"], p["b"]))
+
+
+def is_open(pair: dict) -> bool:
+    """An overlap pair still to decide: not in one cluster, not recorded as separate."""
+    return not pair["same_cluster"] and pair["separate"] is None
 
 
 def status(conn: sqlite3.Connection, project: str) -> dict:
     """What triage has left, step by step, and the next thing to do.
 
     Steps, in order: scope (deterministic), overlaps (pairs of verified
-    findings sharing code with at least one side in no cluster: once both are
-    clustered the pair counts as decided), cluster (verified findings in no
-    cluster), empty (clusters left with no members), track (clusters with no
-    track), check (a track that contradicts the members' scope)."""
+    findings sharing code that are neither in one cluster nor recorded as
+    separate), cluster (verified findings in no cluster), empty (clusters left
+    with no members), track (clusters with no track), check (a track that
+    contradicts the members' scope), shared-fix (a write-up whose writer says
+    its fix also closes another cluster, not yet settled by a merge or a
+    separate decision)."""
     unscoped = [r["slug"] for r in conn.execute(
         "SELECT f.slug FROM findings f LEFT JOIN finding_scope s "
         "ON s.finding_id = f.id AND s.snapshot_id = f.snapshot_id "
         "WHERE f.project = ? AND f.status IN ('verified', 'exported') "
         "AND s.finding_id IS NULL ORDER BY f.id", (project,))]
     loose = unclustered(conn, project)
-    loose_slugs = {f["slug"] for f in loose}
-    open_pairs = [p for p in overlaps(conn, project)
-                  if p["a"] in loose_slugs or p["b"] in loose_slugs]
+    open_pairs = [p for p in overlaps(conn, project) if is_open(p)]
+    flagged = [f for f in shared_fix_flags(conn, project) if f["open"]]
     empty, untracked, check, done = [], [], [], []
     for c in conn.execute("SELECT * FROM clusters WHERE project = ? ORDER BY id", (project,)):
         members = cluster_members(conn, c["id"])
@@ -257,12 +347,15 @@ def status(conn: sqlite3.Connection, project: str) -> dict:
             done.append(row)
     steps = [
         ("scope", unscoped, f"sdive mirror {project} && sdive scope {project}"),
-        ("overlaps", open_pairs, f"sdive overlaps {project}; decide each pair"),
+        ("overlaps", open_pairs, f"sdive overlaps {project}; merge, mark duplicate, or "
+         "sdive cluster separate <a> <b> --note N"),
         ("cluster", [{"slug": f["slug"], "title": f["title"]} for f in loose],
          f"sdive cluster new {project} ... / sdive cluster add ..."),
         ("empty", empty, "sdive cluster drop <cluster>"),
         ("track", untracked, "sdive cluster track <cluster> advisory|plain-fix --note N"),
         ("check", check, "re-decide: sdive cluster track <cluster> ... --note N"),
+        ("shared-fix", flagged, "merge (sdive cluster add <c> <finding> --move) or "
+         "sdive cluster separate --clusters <c> <other> --note N"),
     ]
     nxt = next(({"step": name, "count": len(items), "command": cmd}
                 for name, items, cmd in steps if items), None)

@@ -283,6 +283,19 @@ MIGRATIONS: list[str] = [
     ALTER TABLE unit_reach ADD COLUMN carried_from INTEGER REFERENCES snapshots(id);
     CREATE INDEX unit_reach_unit ON unit_reach(unit_id);
     """,
+    # v11: triage's "separate" decisions on pairs of findings (distinct fixes
+    # although they share code, or although a writer thought one fix closed
+    # both). A pair is listed for review until it is in one cluster or here.
+    """
+    CREATE TABLE separate_pairs (
+        finding_a   INTEGER NOT NULL REFERENCES findings(id),
+        finding_b   INTEGER NOT NULL REFERENCES findings(id),
+        note        TEXT NOT NULL,
+        decided_at  TEXT NOT NULL,
+        PRIMARY KEY (finding_a, finding_b),
+        CHECK (finding_a < finding_b)
+    );
+    """,
 ]
 
 

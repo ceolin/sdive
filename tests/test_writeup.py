@@ -124,6 +124,63 @@ def test_writeup_flow(cfg, scoped):  # noqa: F811
         writeup.approve(conn, "parse-len", None, None)
 
 
+def test_shared_fix_hands_back_to_triage(cfg, scoped):  # noqa: F811
+    conn, snap, mirror = scoped
+    add_finding(conn, snap, "a", [("src/parser.c", 3, 6)])
+    add_finding(conn, snap, "b", [("src/parser.c", 5, 5)])
+    add_finding(conn, snap, "c", [("src/util.c", 3, 3)])
+    rel = triage.Releases(mirror)
+    for i in triage.scope_targets(conn, "demo", [], redo=False):
+        triage.scope_finding(conn, mirror, rel, i)
+    for slug, f in (("parse-len", "a"), ("parse-other", "b"), ("util", "c")):
+        triage.new_cluster(conn, "demo", slug, slug.title(), "fix", [f])
+        triage.set_track(conn, slug, "plain-fix" if slug == "util" else "advisory", "scoped")
+
+    # The brief names the related cluster in detail and the rest by title.
+    b = writeup.brief(conn, cfg, "parse-len")
+    assert [r["slug"] for r in b["related_clusters"]] == ["parse-other"]
+    assert b["related_clusters"][0]["shared"] == ["src/parser.c:5"]
+    assert b["related_clusters"][0]["members"] == [{"slug": "b", "title": "B"}]
+    assert b["other_clusters"] == [{"slug": "util", "title": "Util"}]
+
+    for bad, msg in [([{"cluster": "parse-len", "reason": "x"}], "itself"),
+                     ([{"cluster": "nope", "reason": "x"}], "not a demo cluster")]:
+        stage(cfg, result(shared_fix=bad))
+        with pytest.raises(ledger.LedgerError, match=msg):
+            writeup.record(conn, cfg, "parse-len")
+    stage(cfg, result(shared_fix=[{"cluster": "parse-other", "reason": "same check"}]))
+    assert writeup.record(conn, cfg, "parse-len")["shared_fix"][0]["cluster"] == "parse-other"
+    state = lambda: {r["cluster"]: r["state"]  # noqa: E731
+                     for r in writeup.status(conn, "demo")}["parse-len"]
+    assert state() == "needs-triage"
+    st = triage.status(conn, "demo")
+    assert st["next"]["step"] == "overlaps"   # the a/b pair is undecided too
+    assert [f["cluster"] for f in st["shared-fix"]] == ["parse-len"]
+    with pytest.raises(ledger.LedgerError, match="also closes parse-other"):
+        writeup.approve(conn, "parse-len", None, None)
+    assert "shared_fix" not in writeup.document(conn, cfg, "parse-len")
+
+    # Separating the clusters settles the flag; the draft must be redone,
+    # and the next brief carries the decision.
+    triage.mark_separate(conn, "demo", "parse-len", "parse-other", "two checks",
+                         clusters=True)
+    assert state() == "stale" and triage.status(conn, "demo")["next"] is None
+    assert writeup.brief(conn, cfg, "parse-len")["related_clusters"][0]["separate"] == [
+        "two checks"]
+    stage(cfg, result())
+    writeup.record(conn, cfg, "parse-len")
+    assert state() == "draft"
+
+    # A merge settles it too (the write-up is stale by membership).
+    stage(cfg, result(shared_fix=[{"cluster": "util", "reason": "one helper"}]))
+    writeup.record(conn, cfg, "parse-len")
+    assert state() == "needs-triage"
+    triage.add_to_cluster(conn, "parse-len", ["c"], move=True)
+    triage.set_track(conn, "parse-len", "advisory", "released: in v1.0.0")
+    triage.drop_cluster(conn, "util")
+    assert state() == "stale" and not triage.status(conn, "demo")["shared-fix"]
+
+
 def test_plain_fix_needs_unreportable(cfg, scoped):  # noqa: F811
     conn, snap, _ = scoped
     add_finding(conn, snap, "a", [("src/parser.c", 3, 6)])
