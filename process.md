@@ -12,7 +12,7 @@ as a benchmark round; the default is `main`.
 ## tl;dr
 
 ```
-# 1. Set up (once per project, then mirror again for new commits and tags)
+# 1. Set up (once per project; for new upstream commits see 1a)
 sdive init
 sdive mirror <p>
 sdive units <p> [REV]
@@ -22,6 +22,18 @@ sdive build <p> [--only GLOB]
 sdive builds <p>
 sdive rank run <p> [N|all] --parallel 4    (or /sdive-rank interactively)
 sdive rank show <p>
+
+# 1a. Move to a newer upstream (mirror only fetches; units moves the ledger)
+sdive mirror <p>
+sdive areas <p> --generate REV    (Zephyr, if MAINTAINERS.yml changed)
+sdive units <p>
+    (snapshots the new head; reach and coverage carry to unchanged functions)
+sdive build <p>
+    (builds don't carry: without them the not-compiled penalty is off)
+sdive rank run <p> all --parallel 4
+    (ranks only new and changed functions; `sdive run <p> auto` does this
+     itself, so skip it if analysis starts with auto)
+sdive scope <p>    (when triage reports findings with no release scoping)
 
 # 2. Calibrate (optional; blind benchmark at a commit with known answers)
 sdive bench import <p> <corpus>... --name <set> [--at REV --areas A,B --unchanged]
