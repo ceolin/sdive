@@ -619,6 +619,7 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
               help="auto with --minutes: split the budget into sessions of this size, "
                    "choosing the work afresh for each.")
 @click.option("--parallel", type=click.IntRange(1, 4), default=1, show_default=True)
+@click.option("--area", help="Restrict sweeps and dives to one area (see `sdive areas`).")
 @click.option("--model", envvar="SDIVE_MODEL", default=launch.DEFAULT_MODEL, show_default=True)
 @click.option("-i", "--interactive", is_flag=True,
               help="Open an interactive session instead of running headless (-p).")
@@ -627,8 +628,8 @@ def todo(c: Ctx, project: str, rev: str | None, only: tuple[str, ...], area: str
 @click.option("--dry-run", is_flag=True, help="Print the claude command; don't run it.")
 @pass_ctx
 def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
-         minutes: float | None, session_minutes: float, parallel: int, model: str,
-         interactive: bool, keep_api_key: bool, dry_run: bool) -> None:
+         minutes: float | None, session_minutes: float, parallel: int, area: str | None,
+         model: str, interactive: bool, keep_api_key: bool, dry_run: bool) -> None:
     """Launch Claude Code on the next piece of work (or KIND [LENS]).
 
     auto: first rank any unranked functions at priority >= 4 (headless, as
@@ -644,10 +645,16 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
       sdive run zephyr --minutes 120 --parallel 4
       sdive run mcuboot sweep memory-safety --runs 2
       sdive run mcuboot dive --runs 1 --dry-run
+      sdive run zephyr dive --area bluetooth --runs 5
+
+    --area limits sweeps and dives (and auto's choice between them) to one
+    area; ranking and verification still cover the whole project.
     """
     if runs and minutes:
         raise click.UsageError("give --runs or --minutes, not both")
     p = c.project(project)
+    if area is not None:
+        p.area_named(area)
     _sha, snap = _snapshot_for(c, p, None)
     auto = kind == "auto"
     env = launch.child_env(keep_api_key)
@@ -673,16 +680,17 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
             (p.name,)).fetchone()[0]
         plan = launch.choose(
             None if auto else kind, lens, pending,
-            lambda n: len(ledger.queue_estimate(c.conn, p, snap, "sweep", n)), order,
+            lambda n: len(ledger.queue_estimate(c.conn, p, snap, "sweep", n, area)), order,
             spent=ledger.agent_minutes(c.conn, p.name, snap), sweep_share=p.sweep_share,
-            dive_left=lambda: bool(ledger.queue_estimate(c.conn, p, snap, "dive", "holistic")))
+            dive_left=lambda: bool(
+                ledger.queue_estimate(c.conn, p, snap, "dive", "holistic", area)))
         if plan is None:
             click.echo(f"nothing to do for {kind}" + (f" {lens}" if lens else ""))
             sys.exit(EXIT_NOTHING_TO_DO if remaining == minutes else 0)
         chunk = remaining
         if auto and remaining is not None and not interactive:
             chunk = min(remaining, session_minutes)
-        prompt = launch.invocation(plan, p.name, c.cfg.ledger, runs, chunk, parallel)
+        prompt = launch.invocation(plan, p.name, c.cfg.ledger, runs, chunk, parallel, area)
         argv = launch.command(prompt, model, headless=not interactive, staging=c.cfg.staging)
         click.echo(f"{plan.reason} → {prompt}")
         if dry_run:

@@ -85,8 +85,9 @@ def choose(kind: str | None, lens: str | None, pending: int,
 
 
 def invocation(plan: Plan, project: str, ledger: str, runs: int | None,
-               minutes: float | None, parallel: int) -> str:
-    """The slash-command prompt for the session."""
+               minutes: float | None, parallel: int, area: str | None = None) -> str:
+    """The slash-command prompt for the session. `area` restricts sweeps and
+    dives; verification is not per area."""
     parts = [f"/sdive-{plan.kind}", project]
     if plan.kind == "sweep":
         parts.append(plan.lens)
@@ -96,6 +97,8 @@ def invocation(plan: Plan, project: str, ledger: str, runs: int | None,
         parts.append(str(runs or 1))
     if plan.kind == "dive" and plan.lens:
         parts += ["--lens", plan.lens]
+    if area and plan.kind in ("sweep", "dive"):
+        parts += ["--area", area]
     if parallel > 1:
         parts += ["--parallel", str(parallel)]
     if ledger != "main":

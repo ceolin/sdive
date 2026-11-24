@@ -44,7 +44,7 @@ sdive carry <p> --from <round>
 
 # 3. Analyse (repeat until the queue is empty)
 sdive todo <p>
-sdive run <p> [auto|sweep|dive|verify] [LENS] [--minutes M]
+sdive run <p> [auto|sweep|dive|verify] [LENS] [--minutes M] [--area A]
     (auto: ranks new functions, verifies, then mixes sweeps and dives)
     (or interactively: /sdive-sweep, /sdive-dive, /sdive-verify, which use
      sdive next / brief / record / abandon)
@@ -229,7 +229,7 @@ applies everywhere (MCUboot's lenses).
 | Command | What it does |
 |---|---|
 | `sdive todo <p> [--minutes M] [--kind K] [--rank-min-priority K]` | Work left per kind and lens, with agent-minute estimates from past runs: ranker briefs still to write (functions at priority ≥ K with no judgement, default 4; timed from brief to record), then dives, sweeps and verification. |
-| `sdive run <p> [auto\|sweep\|dive\|verify] [LENS] [--minutes M \| --runs N] [--session-minutes S] [--parallel P]` | Launches a headless Claude session on the matching skill. `auto` first ranks any unranked functions at priority ≥ 4 (as `sdive rank run all`, so a newer `main` needs no separate step), then verifies pending hypotheses, then shares the time between sweeps and dives: whichever is behind its share of the agent-minutes recorded at this snapshot goes next (`sweep_share` in the project's `[runs]`, default 0.5), and among sweeps the least-swept lens in `sweep_order` with work left. With `--minutes`, `auto` splits the budget into sessions of `--session-minutes` (default 60) and chooses again before each, so one command covers verification, breadth and depth. Progress streams to the terminal; the log and reported cost go to the ledger's `sessions/`. `-i` opens an interactive session instead; `--dry-run` prints the command. |
+| `sdive run <p> [auto\|sweep\|dive\|verify] [LENS] [--minutes M \| --runs N] [--session-minutes S] [--parallel P] [--area A]` | Launches a headless Claude session on the matching skill. `auto` first ranks any unranked functions at priority ≥ 4 (as `sdive rank run all`, so a newer `main` needs no separate step), then verifies pending hypotheses, then shares the time between sweeps and dives: whichever is behind its share of the agent-minutes recorded at this snapshot goes next (`sweep_share` in the project's `[runs]`, default 0.5), and among sweeps the least-swept lens in `sweep_order` with work left. With `--minutes`, `auto` splits the budget into sessions of `--session-minutes` (default 60) and chooses again before each, so one command covers verification, breadth and depth. Progress streams to the terminal; the log and reported cost go to the ledger's `sessions/`. `--area` restricts sweeps and dives, and auto's choice between them, to one area; ranking and verification still cover the whole project. `-i` opens an interactive session instead; `--dry-run` prints the command. |
 | `/sdive-sweep <p> <lens\|all> [N\|all] [--minutes M]` | The sweep skill, run interactively. |
 | `/sdive-dive <p> [N\|all] [--minutes M]` | The dive skill. |
 | `/sdive-verify <p> [N\|all] [--minutes M] [--findings FILE]` | The verify skill; `--findings` limits it to the slugs listed in FILE. |
