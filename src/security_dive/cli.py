@@ -652,8 +652,9 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
       sdive run mcuboot dive --runs 1 --dry-run
       sdive run zephyr dive --area bluetooth --runs 5
 
-    --area limits ranking, sweeps and dives (and auto's choice between
-    them) to one area; verification still covers the whole project.
+    --area limits ranking, sweeps and dives to one area, and auto shares
+    the time between them by the runs in that area; verification still
+    covers the whole project.
     """
     if runs and minutes:
         raise click.UsageError("give --runs or --minutes, not both")
@@ -687,7 +688,8 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
         plan = launch.choose(
             None if auto else kind, lens, pending,
             lambda n: len(ledger.queue_estimate(c.conn, p, snap, "sweep", n, area)), order,
-            spent=ledger.agent_minutes(c.conn, p.name, snap), sweep_share=p.sweep_share,
+            spent=ledger.agent_minutes(c.conn, p.name, snap, area),
+            sweep_share=p.sweep_share,
             dive_left=lambda: bool(
                 ledger.queue_estimate(c.conn, p, snap, "dive", "holistic", area)))
         if plan is None:
