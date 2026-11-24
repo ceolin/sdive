@@ -101,7 +101,8 @@ the members to `exported`. Print the paths.
 
 `uv run sdive writeups <project>`, then one paragraph: exported this session,
 drafts awaiting review, what's left, and that zepsec's client-side intake
-picks the exports up from `analysis/exports/<project>/`.
+picks the exports up from `analysis/exports/<project>/` (for Mbed TLS no
+intake exists yet: say the exports wait there for its hand-off tooling).
 
 ## Invariants
 

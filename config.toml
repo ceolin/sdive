@@ -19,6 +19,17 @@ reference_repo = "/Users/davidb/zephyrproject/zephyr"
 default_branch = "main"
 threat_model = "projects/zephyr/threat-model.md"  # draft; Open rulings pending the Zephyr security team
 
+# Mbed TLS from the private restricted repo: development-restricted is the
+# latest development code with in-embargo security fixes already merged, so
+# scans don't rediscover what is being fixed. Everything fetched from it is
+# embargoed material: it stays in work/ and analysis/.
+[projects.mbedtls]
+github = "Mbed-TLS/mbedtls-restricted"
+upstream = "https://github.com/Mbed-TLS/mbedtls-restricted.git"
+reference_repo = "/Users/davidb/linaro/mbedtls"   # public clone, --reference only
+default_branch = "development-restricted"
+threat_model = "projects/mbedtls/threat-model.md"  # from the public SECURITY.md threat models
+
 # Machine-specific: what `sdive build zephyr` configures with. The Python env
 # and the module cache are the user's and are only read (PYTHONDONTWRITEBYTECODE,
 # west --path-cache clones from them).

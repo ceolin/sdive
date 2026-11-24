@@ -40,7 +40,11 @@ if you cannot, after checking every point below against the code.
    the serial-recovery exception). Zephyr: the privilege differential, no
    syscall boundary without `CONFIG_USERSPACE`, assertions are not checks, and
    who checked the length (an earlier check counts only if the value cannot
-   change after it).
+   change after it). Mbed TLS: who supplies the bytes (any peer before
+   authentication, an authenticated peer, an object handed to a parser), every
+   `end - p` check on the path, and the X.509 formatting ruling (leniency
+   counts only if it changes a security decision or causes undefined
+   behaviour).
 4. **Impact:** it violates a named property of the threat model. Apply its
    scope rulings, e.g. a path that fails closed is not a bypass; data later
    re-validated under a trusted key needs the key; code built only for tests,

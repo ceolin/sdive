@@ -1,7 +1,7 @@
 # security-dive — plan
 
 Proactive, LLM-driven security analysis of embedded codebases — **MCUboot first,
-then Zephyr** — with durable tracking of *what has been examined, through which
+then Zephyr, and Mbed TLS** — with durable tracking of *what has been examined, through which
 lens, at what version*, so the work can be incremental and can gate incoming
 changes.
 
@@ -465,6 +465,66 @@ In order:
 ### Phase 5 — Zephyr incremental
 Post-merge change review on `main`, then PRs; possibly sharing the commit walk
 with zepsec (one pass asking "silent fix?" and "introduces something?").
+
+### Phase 6 — Mbed TLS (added 2026-11-24)
+
+The TLS/DTLS, X.509 and PKCS#7 library MCUboot and Zephyr both build
+against. Mbed TLS's security process (reports held as issues in
+`mbedtls-restricted`, incident handling, advisories) is theirs and is not
+sdive's concern: sdive covers only the code. Holding reports, and the
+hand-off of verified clusters, will be an addition to zepsec or tooling of
+its own, later; until then exports wait in `analysis/exports/mbedtls/`.
+
+- **Source: `development-restricted` of the private `mbedtls-restricted`
+  repo** — the latest development code with in-embargo security fixes
+  already merged, so a scan doesn't rediscover what is being fixed, and a
+  finding is new to the Mbed TLS team. The mirror is fetched over the user's
+  GitHub credentials, with the public clone (`~/linaro/mbedtls`) as
+  `--reference`. Everything in the mirror and snapshots is embargoed
+  material; it stays in `work/`, and committed files (threat model, lenses,
+  writer guidance) are written from public sources only.
+- **TF-PSA-Crypto is a reference tree.** In 4.x all crypto lives in the
+  `tf-psa-crypto` submodule. The restricted branch can pin commits that
+  exist only in `TF-PSA-Crypto-restricted`, so the reference sets `url` to
+  fetch from there (a superset of the public repo). Defects in it are
+  upstream notes for now. It ships, versions and tags (`v1.x`) on its own,
+  so auditing it is a separate project (`tf-psa-crypto`, same restricted
+  model), not a wider scope here: candidate next step.
+- **Scope**: `library/` and `include/mbedtls/` (66 files, 963 functions,
+  ~41k lines in functions at 4.3.0); `programs/`, `tests/` and the
+  `framework` submodule are out. Hand-written areas: record layer, TLS 1.3
+  and 1.2 handshakes, version-independent TLS, key schedule, session
+  tickets/cache/cookies, X.509 certificate parsing and verification, shared
+  X.509, CRL/CSR, PKCS#7 at priority 4–5; writing, sockets glue and debug
+  below. Small enough that ranking is optional (35 cheap ranker briefs).
+  The extractor needs no change: every `.c` file's function count matches
+  its bare column-0 `}` (`x509_oid.c`'s lookups are macro-generated, so
+  sweeps see that file whole and dives skip it).
+- **Threat model** (`projects/mbedtls/threat-model.md`): restated from the
+  public `SECURITY.md` of Mbed TLS and TF-PSA-Crypto as P1–P5 (memory
+  safety, peer authentication, channel security, secret confidentiality,
+  availability) and A1–A4 (remote network attacker or malicious peer,
+  authenticated peer, local timing attacker limited to documented
+  techniques, object supplier), with SECURITY.md's rulings (X.509 leniency
+  not a finding unless it changes a decision or causes UB, block-cipher and
+  Everest timing caveats, compiler side channels only at common
+  optimisation levels, physical and non-timing side channels out). Two
+  **Open** proposals for the Mbed TLS security team: debug output, and DoS
+  by authenticated peers.
+- **Lenses**: `memory-safety`, `authentication` (P2: chains, extensions,
+  revocation, hostname, handshake binding, resumption), `protocol-state`
+  (P3/P5), `side-channel` (remote and documented local timing on record
+  decryption, comparisons, RSA key exchange), `secrets`, and `holistic` for
+  dives. Written from the threat model and general vulnerability classes,
+  before any truth set.
+- **Release scoping** works unchanged: releases are `vX.Y.Z` tags on one
+  repo for the 4.x line and the 3.6 LTS alike, and an embargoed fix on the
+  restricted branch is in no release yet.
+- **Not yet**: the 3.6 LTS (crypto in the same tree; what MCUboot and
+  Zephyr's `mbedtls-3.6` module ship) and the 4.1 LTS, as projects or
+  ledgers of their own; a dedup corpus from published advisories; a blind
+  benchmark from past advisories' fix commits (`bench import` from public
+  fixes works as for Zephyr).
 
 ## Threat model upstreaming (side track)
 

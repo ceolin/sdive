@@ -76,7 +76,8 @@ or starts one:
 `uv run sdive cluster new <project> <cluster-slug> <slug>... --title "<title>" --rationale "<why one fix>"`.
 
 **The CVE counting rule decides the shape.** Zephyr is MCUboot's CNA and wants
-one CVE per independently fixable flaw. Join findings only when one natural
+one CVE per independently fixable flaw; Mbed TLS (CVEs from MITRE) counts
+the same way. Join findings only when one natural
 change *necessarily* fixes them all. If the fixes could land as separate
 commits, they are separate clusters, even when the findings sit in one
 function or share a theme (e.g. "missing zeroisation" in three places is three

@@ -121,7 +121,7 @@ Per-project configuration: `config.toml` (repos, paths, threat model) and
 reference trees, `sweep_order`). Lenses live in `projects/<p>/lenses/`. The
 agents' threat model is `projects/<p>/threat-model.md`.
 
-**Areas.** MCUboot's are hand-written and matched in order. Zephyr's come
+**Areas.** MCUboot's and Mbed TLS's are hand-written and matched in order. Zephyr's come
 from `MAINTAINERS.yml` (`[areas_source]`, generated into
 `projects/zephyr/areas.toml`): where entries overlap, the most specific
 pattern wins (an exact file, then the longest literal prefix). On top of
@@ -208,8 +208,9 @@ calls itself.
 
 - **Sweep:** one focused lens (MCUboot: memory-safety, authenticity,
   recovery, upgrade-state, rollback, secrets; Zephyr: memory-safety,
-  syscall-boundary, protocol-state, lifetime, protocol-security) over a few
-  whole areas per run (an area
+  syscall-boundary, protocol-state, lifetime, protocol-security; Mbed TLS:
+  memory-safety, authentication, protocol-state, side-channel, secrets)
+  over a few whole areas per run (an area
   too big for one run goes file by file), covering the uncovered in-scope
   code. Broad and cheap per line.
 - **Dive:** the holistic lens over the uncovered functions of the
@@ -414,7 +415,11 @@ version of an exported cluster makes it `approved` again, ready to re-export.
 
 ## 6. zepsec, client side
 
-zepsec's work, not sdive's; its brief is `../zepsec/sdive-intake.md`. A local
+zepsec's work, not sdive's; its brief is `../zepsec/sdive-intake.md`.
+Mbed TLS has no intake yet: its advisories are not GHSAs (they ship with
+the fixing release, CVEs from MITRE), and the hand-off will be an addition
+to zepsec or tooling of its own. Its exports wait in
+`analysis/exports/mbedtls/` until then. A local
 intake channel on the zepsec client copies each export into a local-only unit
 (nothing derived from an export goes to zepsec's prod Instance). It dedups
 against the project's advisories and related corpora, then runs the pre-fix

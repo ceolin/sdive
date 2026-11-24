@@ -1,9 +1,9 @@
 # CLAUDE.md — security-dive
 
-Proactive security analysis of MCUboot, then Zephyr. **`PLAN.md` is the design
-and roadmap** — read it before structural changes. **`process.md` is the
-operating manual**: the flow from setup to fixed advisories, step by step,
-with the `sdive` command or skill for each.
+Proactive security analysis of MCUboot, then Zephyr and Mbed TLS. **`PLAN.md`
+is the design and roadmap** — read it before structural changes.
+**`process.md` is the operating manual**: the flow from setup to fixed
+advisories, step by step, with the `sdive` command or skill for each.
 
 ## Keeping process.md current
 
@@ -36,17 +36,23 @@ committed and may be shared.
 ## Invariants
 
 - **Never write to the user's source checkouts** (`~/ai/mcuboot`,
-  `~/linaro/mcuboot`, `~/zephyrproject/zephyr`). Use `work/mirrors/` and
-  read-only snapshots under `work/snapshots/`. When running `jj` against a user
-  repo for reading, pass `--ignore-working-copy`.
+  `~/linaro/mcuboot`, `~/zephyrproject/zephyr`, `~/linaro/mbedtls`). Use
+  `work/mirrors/` and read-only snapshots under `work/snapshots/`. When
+  running `jj` against a user repo for reading, pass `--ignore-working-copy`.
 - **`analysis/` is private** (live, embargoed vulnerabilities): gitignored here,
   never published, never quoted in commit messages, PRs or issues.
+- **Mbed TLS comes from the private `mbedtls-restricted` repo**: its mirror
+  and snapshots under `work/` hold embargoed fixes. Nothing from them (or
+  from the restricted process documents) goes into committed files; the
+  agents' threat model is derived from the public `SECURITY.md` only.
 - **Change findings follow the disclosure policy in `PLAN.md`**: comment on an
   unmerged PR (show the user the draft before posting); merged but unreleased →
-  ordinary fix, no GHSA/CVE; released → GHSA via zepsec.
+  ordinary fix, no GHSA/CVE; released → GHSA via zepsec (Mbed TLS: its own
+  advisory with the fixing release; hand-off not built yet).
 - Every verdict names the threat-model property and attacker class. Agents use
-  `projects/mcuboot/threat-model.md` (derived from `../zepsec/threat-model.md`
-  with finding references removed); keep finding IDs out of it.
+  `projects/<p>/threat-model.md` (MCUboot's derived from
+  `../zepsec/threat-model.md` with finding references removed); keep finding
+  IDs out of all of them.
 - **Benchmarks are blind.** Never read `analysis/truth/` (or zepsec analysis
   trees) during analysis, never put truth content into lenses, agents, briefs or
   dossiers. Only `sdive bench report` reads it, after a round. Enforced per

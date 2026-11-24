@@ -48,8 +48,9 @@ project's builds compile. Do not lower a level because a protocol, driver or
 subsystem is not default-on.
 
 - **3** — parses or acts on attacker-controlled input directly: packet, PDU,
-  descriptor, frame, option, CBOR/JSON payload, filesystem image data, or a
-  syscall argument (`z_vrfy_*`), from any attacker class in the threat model
+  descriptor, frame, option, CBOR/JSON payload, filesystem image data, a TLS
+  record or handshake message, a DER/PEM object, or a syscall argument
+  (`z_vrfy_*`), from any attacker class in the threat model
   (a paired or connected peer counts, if the threat model names it).
 - **2** — handles attacker-derived data indirectly (called from a level-3
   handler with fields of the input), or level-3 work behind an option inside
@@ -64,7 +65,7 @@ subsystem is not default-on.
   debug helpers, platform and board glue. If you cannot name the attacker
   input and how it arrives, it is 0.
 
-Name the attacker class (A1-A6 per the threat model) for levels 1-3. The
+Name the attacker class (as the threat model labels them) for levels 1-3. The
 reason is one line: the input and how it arrives ("L2CAP signalling PDU from
 the peer via `l2cap_recv`").
 
