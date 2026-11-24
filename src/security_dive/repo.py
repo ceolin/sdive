@@ -236,7 +236,7 @@ def _export_references(
             absent.append(full)
             continue
         sha = gitlink(parent_git, parent_sha, ref.path)
-        url = _resolve_url(sm.url, parent_url)
+        url = ref.url or _resolve_url(sm.url, parent_url)
         # Local submodule git dirs are keyed by submodule *name*, not path.
         local = parent_local / "modules" / sm.name if parent_local else None
         local = local if local is not None and local.is_dir() else None

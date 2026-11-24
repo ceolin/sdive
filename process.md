@@ -141,7 +141,10 @@ followed).
 
 **Reference trees** are either submodules (`path`, MCUboot) or west
 projects (`west = "<name>"`, Zephyr), exported to `_west/<name>` at the
-revision the snapshot's `west.yml` pins.
+revision the snapshot's `west.yml` pins. A submodule reference may set
+`url` to fetch from a private copy of its repo instead of the URL in
+`.gitmodules`, for pinned commits the public repo lacks (Mbed TLS's
+restricted branches pin embargoed TF-PSA-Crypto fixes).
 
 Never write to the user's own source checkouts; everything reads the mirror
 and snapshots.

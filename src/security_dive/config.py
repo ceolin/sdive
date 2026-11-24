@@ -108,6 +108,10 @@ class Reference:
     # A west.yml project (Zephyr modules) instead of a submodule: exported to
     # WEST_DIR/<name> at the revision the snapshot's west.yml pins.
     west: str | None = None
+    # Fetch from here instead of the URL `.gitmodules` gives: a private repo
+    # holding commits the public one lacks (Mbed TLS's restricted branches pin
+    # TF-PSA-Crypto commits that exist only in TF-PSA-Crypto-restricted).
+    url: str | None = None
 
     def as_dict(self) -> dict:
         d = {
@@ -117,6 +121,8 @@ class Reference:
         }
         if self.west:
             d["west"] = self.west
+        if self.url:
+            d["url"] = self.url
         return d
 
 
@@ -308,6 +314,8 @@ def _path(root: Path, value: str | None) -> Path | None:
 
 def _load_reference(raw: dict) -> Reference:
     if "west" in raw:
+        if raw.get("url"):
+            raise ConfigError(f"west reference {raw['west']!r}: `url` applies to submodules only")
         if raw.get("nested"):
             raise ConfigError(f"west reference {raw['west']!r}: nested references unsupported")
         return Reference(path=f"{WEST_DIR}/{raw['west']}", role=raw.get("role", ""),
@@ -318,6 +326,7 @@ def _load_reference(raw: dict) -> Reference:
         role=raw.get("role", ""),
         export=tuple(p.strip("/") for p in raw.get("export", ())),
         nested=tuple(_load_reference(n) for n in raw.get("nested", ())),
+        url=raw.get("url"),
     )
 
 

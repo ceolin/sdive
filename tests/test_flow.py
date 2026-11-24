@@ -479,3 +479,36 @@ def test_shorten_titles():
     assert len(data["hypotheses"][0]["title"]) == ledger.TITLE_MAX
     assert data["hypotheses"][0]["title"].endswith("…")
     assert data["hypotheses"][1]["title"] == "ok"
+
+
+def test_reference_url_override_fetches_private_commits(tmp_path, root, upstream, library):
+    """A superproject pinning a submodule commit that only a private copy of
+    the submodule's repo holds (Mbed TLS restricted -> TF-PSA-Crypto-restricted)
+    is snapshotted from the reference's `url`, not `.gitmodules`'."""
+    from security_dive.config import load_config
+
+    from .conftest import commit
+
+    private = tmp_path / "lib-restricted"
+    git(tmp_path, "clone", "-q", str(library), str(private))
+    (private / "library" / "fix.c").write_text("int fixed(void) { return 0; }\n")
+    fix = commit(private, "embargoed fix")
+    git(upstream, "update-index", "--cacheinfo", f"160000,{fix},ext/lib")
+    commit(upstream, "bump lib to the private fix")
+
+    def snap(extra: str):
+        pt = root / "projects" / "demo" / "project.toml"
+        pt.write_text(pt.read_text().replace('role = "Example library"\n',
+                                             f'role = "Example library"\n{extra}'))
+        c = load_config(root / "config.toml")
+        p = c.project("demo")
+        repo.ensure_mirror(c, p)
+        return repo.snapshot(c, p, repo.resolve(c, p, "main"))
+
+    with pytest.raises(repo.GitError, match=fix):  # the public repo lacks it
+        snap("")
+    tree = snap(f'url = "{private}"\n')
+    assert (tree / "ext" / "lib" / "library" / "fix.c").is_file()
+    assert (tree / "ext" / "lib" / "core" / "src" / "core.c").is_file()  # nested still works
+    refs = repo.read_marker(tree)["references"]
+    assert refs[0]["url"] == str(private) and refs[0]["sha"] == fix
