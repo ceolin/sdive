@@ -116,3 +116,9 @@ def test_run_area_ranks_only_that_area(root, monkeypatch):
     assert "in parsing unranked → sdive rank run all --area parsing" in r.output
     r = run(main, ["run", "demo", "--area", "nosuch"])
     assert r.exit_code != 0 and "unknown area 'nosuch'" in r.output
+    r = run(main, ["run", "demo", "verify", "--area", "misc"])
+    assert r.exit_code == 2 and "verification is not per area" in r.output
+    (root / "projects" / "demo" / "lenses" / "parsers.md").write_text(
+        "---\napplies:\n  areas: [parsing]\n---\n# parsers\n")
+    r = run(main, ["run", "demo", "sweep", "parsers", "--area", "misc"])
+    assert "nothing to do for sweep parsers in area misc" in r.output

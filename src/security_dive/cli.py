@@ -658,6 +658,8 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
     """
     if runs and minutes:
         raise click.UsageError("give --runs or --minutes, not both")
+    if area is not None and kind == "verify":
+        raise click.UsageError("verification is not per area; drop --area")
     p = c.project(project)
     if area is not None:
         p.area_named(area)
@@ -693,7 +695,8 @@ def run_(c: Ctx, project: str, kind: str, lens: str | None, runs: int | None,
             dive_left=lambda: bool(
                 ledger.queue_estimate(c.conn, p, snap, "dive", "holistic", area)))
         if plan is None:
-            click.echo(f"nothing to do for {kind}" + (f" {lens}" if lens else ""))
+            click.echo(f"nothing to do for {kind}" + (f" {lens}" if lens else "")
+                       + (f" in area {area}" if area else ""))
             sys.exit(EXIT_NOTHING_TO_DO if remaining == minutes else 0)
         chunk = remaining
         if auto and remaining is not None and not interactive:
